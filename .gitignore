@@ -1,0 +1,8 @@
+src/models/__pycache__/
+tests/unit/__pycache__/
+.idea/
+src/__pycache__/
+src/api/prompts/__pycache__/
+src/api/routers/__pycache__/
+logs/
+logs/app.log

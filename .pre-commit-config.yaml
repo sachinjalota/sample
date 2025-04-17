@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: ruff
+        language: system
+        types: [python]
+        args: [--config, .ruff.toml, check]
+
+      - id: ruff-format
+        name: ruff-format
+        entry: ruff
+        language: system
+        types: [python]
+        args: [--config, .ruff.toml, format]
+
+      - id: isort
+        name: isort
+        entry: isort
+        language: system
+        types: [python]
+        args: ["--sp", ".isort.cfg"]
