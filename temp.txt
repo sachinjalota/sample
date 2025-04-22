@@ -194,3 +194,52 @@ class ChatCompletionRequest(BaseModel):
     # Advanced extra parameters captured via kwargs
     extra_params: Optional[ExtraParams] = None
 
+{
+  "model_name": "gemini-1.5-pro",
+  "system_prompt": "Helpful agent",
+  "user_prompt": "Whats the weather like in Boston today?",
+  "auth_params": {},
+  "temperature": 1,
+  "top_p": 0.95,
+  "max_completion_tokens": 1000,
+  "frequency_penalty": 0,
+  "presence_penalty": 0,
+  "modalities": [
+    "text"
+  ],
+  "image_url": "",
+  "stream": false,
+  "guardrail_input_id": "0",
+  "guardrail_output_id": "1",
+  "extra_params": {
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_current_weather",
+          "description": "Get the current weather in a given location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA"
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "celsius",
+                  "fahrenheit"
+                ]
+              }
+            },
+            "required": [
+              "location"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": "auto"
+  }
+}
