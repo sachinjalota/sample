@@ -1,0 +1,136 @@
+from typing import Optional, List, TypeAlias, Literal, Union, Dict
+from pydantic import BaseModel, Field
+from src.config import settings
+
+ChatCompletionModality: TypeAlias = Literal["text", "audio"]
+  
+class ChatCompletionRequest(BaseModel):
+    # Core Parameters
+    model_name: str = Field(default=settings.default_model)
+    system_prompt: Optional[str] = None
+    user_prompt: str = Field(min_length=5)
+    auth_params: BaseModel
+    temperature: Optional[float] = Field(1.0, ge=0.0, le=2.0, 
+                                         description="Between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. General recommendation is either alter this or top_p but not both.")
+    top_p: Optional[float] = Field(0.95, ge=0.0, le=1.0, 
+                                   description="An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered. General recommendation is either alter this or temperature but not both.")
+    max_completion_tokens: Optional[int] = Field(-1, ge=1)
+    frequency_penalty: Optional[float] = Field(0.0, ge=-2.0, le=2.0, 
+                                               description="Number between -2.0 and 2.0. Positive values penalize new tokens based on their existing frequency in the text so far, decreasing the model's likelihood to repeat the same line verbatim.")
+    presence_penalty: Optional[float] = Field(0.0, ge=-2.0, le=2.0, 
+                                               description="Number between -2.0 and 2.0. Positive values penalize new tokens based on whether they appear in the text so far, increasing the model's likelihood to talk about new topics.")
+    
+    modalities: Optional[List[ChatCompletionModality]] = ["text"]
+    image_url: Optional[str] = None
+    stream: bool = False
+    guardrail_input_id: Optional[str] = None
+    guardrail_output_id: Optional[str] = None
+
+    # Advanced extra parameters capatured via kwargs
+    extra_params: Optional[Dict[str, Union[str, int, float, List[str], Dict[str, Union[str, int]]]]] = None
+
+
+{
+  "detail": [
+    {
+      "loc": [
+        "body",
+        "extra_params",
+        "tools",
+        "str"
+      ],
+      "msg": "Input should be a valid string",
+      "type": "string_type"
+    },
+    {
+      "loc": [
+        "body",
+        "extra_params",
+        "tools",
+        "int"
+      ],
+      "msg": "Input should be a valid integer",
+      "type": "int_type"
+    },
+    {
+      "loc": [
+        "body",
+        "extra_params",
+        "tools",
+        "float"
+      ],
+      "msg": "Input should be a valid number",
+      "type": "float_type"
+    },
+    {
+      "loc": [
+        "body",
+        "extra_params",
+        "tools",
+        "list[str]",
+        0
+      ],
+      "msg": "Input should be a valid string",
+      "type": "string_type"
+    },
+    {
+      "loc": [
+        "body",
+        "extra_params",
+        "tools",
+        "dict[str,union[str,int]]"
+      ],
+      "msg": "Input should be a valid dictionary",
+      "type": "dict_type"
+    }
+  ],
+  "body": {
+    "model_name": "gemini-1.5-pro",
+    "system_prompt": "Helpful agent",
+    "user_prompt": "Whats the weather like in Boston today?",
+    "auth_params": {},
+    "temperature": 1,
+    "top_p": 0.95,
+    "max_completion_tokens": 1000,
+    "frequency_penalty": 0,
+    "presence_penalty": 0,
+    "modalities": [
+      "text"
+    ],
+    "image_url": "",
+    "stream": false,
+    "guardrail_input_id": "0",
+    "guardrail_output_id": "1",
+    "extra_params": {
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_current_weather",
+            "description": "Get the current weather in a given location",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "location": {
+                  "type": "string",
+                  "description": "The city and state, e.g. San Francisco, CA"
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "celsius",
+                    "fahrenheit"
+                  ]
+                }
+              },
+              "required": [
+                "location"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    }
+  }
+}
