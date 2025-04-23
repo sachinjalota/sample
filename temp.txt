@@ -1,3 +1,55 @@
-{
-  "error": "An error occurred while uploading the file : Traceback (most recent call last):\n  File \"/Users/epfn119476/Documents/HDFC/genai_platform_services_local/src/api/routers/chatcompletion_router.py\", line 88, in chatcompletion\n    response = client.chat.completions.create(**payload)\n  File \"/Users/epfn119476/Documents/HDFC/genai_platform_services_local/venv/lib/python3.10/site-packages/openai/_utils/_utils.py\", line 279, in wrapper\n    return func(*args, **kwargs)\n  File \"/Users/epfn119476/Documents/HDFC/genai_platform_services_local/venv/lib/python3.10/site-packages/openai/resources/chat/completions/completions.py\", line 879, in create\n    return self._post(\n  File \"/Users/epfn119476/Documents/HDFC/genai_platform_services_local/venv/lib/python3.10/site-packages/openai/_base_client.py\", line 1242, in post\n    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))\n  File \"/Users/epfn119476/Documents/HDFC/genai_platform_services_local/venv/lib/python3.10/site-packages/openai/_base_client.py\", line 919, in request\n    return self._request(\n  File \"/Users/epfn119476/Documents/HDFC/genai_platform_services_local/venv/lib/python3.10/site-packages/openai/_base_client.py\", line 1023, in _request\n    raise self._make_status_error_from_response(err.response) from None\nopenai.BadRequestError: Error code: 400 - {'error': {'message': \"litellm.UnsupportedParamsError: vertex_ai does not support parameters: ['reasoning_effort'], for model=gemini-1.5-flash-002. To drop these, set `litellm.drop_params=True` or for proxy:\\n\\n`litellm_settings:\\n drop_params: true`\\n. \\n If you want to use these params dynamically send allowed_openai_params=['reasoning_effort'] in your request.. Received Model Group=gemini-1.5-flash\\nAvailable Model Group Fallbacks=None\", 'type': 'None', 'param': None, 'code': '400'}}\n"
-}
+To-Do List
+Set Up the API Infrastructure
+
+Define the architecture for the wrapper API.
+
+Establish secure authentication & authorization mechanisms.
+
+Ensure scalability and performance optimization.
+
+Implement OpenAI Chat Completion Service
+
+Integrate the chat API for seamless interaction with LLMs.
+
+Support all possible OpenAI request body parameters.
+
+Enable Multimodal Input Handling (Text & Image)
+
+Extend functionality to process both text prompts and images.
+
+Ensure proper formatting and handling for various input types.
+
+Develop Request Customization Features
+
+Allow flexible customization of API requests.
+
+Implement support for different OpenAI parameters (e.g., temperature, max tokens).
+
+Optimize LLM Platform Interaction
+
+Ensure smooth communication between the wrapper API and LLM models.
+
+Design robust error handling and fallback mechanisms.
+
+Testing & Validation
+
+Conduct unit tests for API requests and responses.
+
+Ensure proper handling of various input formats (text & image).
+
+Perform integration testing with OpenAI services.
+
+Deployment & Documentation
+
+Deploy the API on a suitable infrastructure.
+
+Provide clear documentation for developers, including sample requests.
+
+Benefits
+Enhanced AI Capabilities: Supports both text and image prompts, enabling richer interactions with LLMs.
+
+Developer-Friendly Interface: Simplifies API interactions, reducing complexity and improving usability.
+
+Scalability & Flexibility: Allows full customization of OpenAI API requests to accommodate various use cases.
+
+Optimized Performance: Ensures efficient communication with LLM models, improving response accuracy and speed.
