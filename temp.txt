@@ -1,0 +1,415 @@
+import base64
+import traceback
+from typing import Union
+
+import httpx
+import openai
+import opik
+import requests
+from fastapi import APIRouter, Header, HTTPException, status
+from fastapi.responses import JSONResponse
+
+from src.api.prompts.default_prompts import DEFAULT_SYSTEM_PROMPT
+from src.config import settings
+from src.logging_config import Logger
+from src.models.completion_input import ChatCompletionRequest
+from src.utility.guardrails import scan_output, scan_prompt
+
+router = APIRouter()
+logger = Logger.create_logger("chat_completion")
+
+
+@router.post(
+    f"{settings.chatcompletion_endpoint}",
+    summary="Endpoint for chat completion request ",
+    response_description="content: response from llm ",
+    status_code=status.HTTP_200_OK,
+)
+@opik.track
+async def chatcompletion(
+    request: ChatCompletionRequest,
+    x_session_id: str = Header(...),
+    x_usecase_id: str = Header(...),
+    x_base_api_key: Union[str, None] = Header(None),
+):
+    if not x_session_id or not x_usecase_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-Session-ID or X-Usecase-ID headers",
+        )
+
+    try:
+        verify = False if settings.env != "PROD" else True
+
+        messages = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}]
+
+        if isinstance(request.user_prompt, str):
+            # Run guardrails validation for user prompt
+            guardrails_input_result = scan_prompt(
+                prompt=request.user_prompt,
+                session_id=x_session_id,
+                usecase_id=x_usecase_id,
+                guardrail_id=request.guardrail_id
+                or settings.default_import_guardrail_id,
+            )
+            if not guardrails_input_result.get("is_valid", False):
+                return JSONResponse(
+                    content={
+                        "error": "Input Guardrails validation failed",
+                        "details": guardrails_input_result,
+                    },
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if request.image_url:
+                img_resp = requests.get(request.image_url, verify=verify)
+                img_resp.raise_for_status()
+
+                img_data = img_resp.content
+
+                base64_enc_img = base64.b64encode(img_data).decode("utf-8")
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": request.user_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_enc_img}",
+                                },
+                            },
+                        ],
+                    }
+                )
+            else:
+                messages.append({"role": "user", "content": request.user_prompt})
+
+        elif isinstance(request.user_prompt, list):
+            user_content = [
+                f"{msg.role} - {msg.content}" for msg in request.user_prompt
+            ]
+            for user_cont in user_content:
+                guardrails_input_result = scan_prompt(
+                    prompt=user_cont,
+                    session_id=x_session_id,
+                    usecase_id=x_usecase_id,
+                    guardrail_id=request.guardrail_id
+                    or settings.default_import_guardrail_id,
+                )
+                if not guardrails_input_result.get("is_valid", False):
+                    return JSONResponse(
+                        content={
+                            "error": "Input Guardrails validation failed",
+                            "details": guardrails_input_result,
+                        },
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            for msg in request.user_prompt:
+                messages.append({"role": msg.role, "content": msg.content})
+
+        else:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Inavlid format of user_promt. It must be either string or list of messages.",
+            )
+
+        payload = {"model": request.model_name, "messages": messages}
+
+        if request.model_config_params:
+            payload.update(request.model_config_params)
+
+        http_client = httpx.Client(http2=True, verify=verify)
+        client = openai.OpenAI(
+            api_key=x_base_api_key,
+            base_url=settings.base_api_url,
+            http_client=http_client,
+        )
+
+        response = client.chat.completions.create(**payload)
+
+        logger.info(f"Completion response generated: {response}")
+
+        user_content = [f'{msg["role"]} - {msg["content"]}' for msg in messages]
+
+        # Run guardrails validation for LLM output
+        guardrails_output_result = scan_output(
+            input_prompt="\n".join(user_content),
+            output=response.dict()["choices"][0]["message"]["content"],
+            session_id=x_session_id,
+            usecase_id=x_usecase_id,
+            guardrail_id=request.guardrail_id or settings.default_output_guardrail_id,
+        )
+        if not guardrails_output_result.get("is_valid", False):
+            return JSONResponse(
+                content={
+                    "error": "Output Guardrails validation failed",
+                    "details": guardrails_output_result,
+                },
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return JSONResponse(content=response.dict(), status_code=status.HTTP_200_OK)
+
+    except Exception:
+        logger.error(f"## Error: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, detail=f"## Error: {traceback.format_exc()}"
+        )
+
+
+from typing import Dict, List, Literal, Optional, TypeAlias, Union
+
+from pydantic import BaseModel, Field
+
+from src.config import settings
+
+ChatCompletionModality: TypeAlias = Literal["text", "audio"]
+
+
+# List Messages
+class Messages(BaseModel):
+    role: str
+    content: str
+
+
+# Tool Parameters Model
+class ToolParameters(BaseModel):
+    type: Literal["object"]
+    properties: Dict[str, Dict[str, Union[str, List[str]]]]
+    required: List[str]
+
+
+# Function Model
+class ToolFunction(BaseModel):
+    name: str
+    description: Optional[str] = None
+    parameters: ToolParameters
+
+
+# Tool Model
+class Tool(BaseModel):
+    type: Literal["function"]
+    function: ToolFunction
+
+
+# Model Configuration
+class ModelParams(BaseModel):
+    frequency_penalty: Optional[float] = Field(
+        0,
+        ge=-2.0,
+        le=2.0,
+        description="Positive values penalize new tokens based on their existing frequency in the text so far, decreasing the model's likelihood to repeat the same line verbatim.",
+    )
+    logit_bias: Optional[Dict[str, int]] = None
+    logprobs: Optional[bool] = Field(
+        default=False, description="Whether to return log probabilities."
+    )
+    max_completion_tokens: Optional[int] = Field(100, ge=1)
+    metadata: Optional[Dict[str, str]] = None
+    modalities: Optional[List[ChatCompletionModality]] = ["text"]
+    n: Optional[int] = Field(1)
+    # parallel_tool_calls: Optional[bool] = Field(default=True)
+    prediction: Optional[Dict[str, Union[str, int, float]]] = None
+    presence_penalty: Optional[float] = Field(
+        0.0,
+        ge=-2.0,
+        le=2.0,
+        description="Positive values penalize new tokens based on whether they appear in the text so far, increasing the model's likelihood to talk about new topics.",
+    )
+    response_format: Optional[Dict[str, Union[str, Dict[str, str]]]] = None
+    seed: Optional[int] = Field(None, description="Seed for deterministic sampling.")
+    service_tier: Optional[Literal["auto", "default", "flex"]] = "auto"
+    stop: Optional[Union[str, List[str]]] = None
+    store: Optional[bool] = Field(
+        default=False, description="Whether to store the completion output."
+    )
+    stream: bool = False
+    stream_options: Optional[Dict[str, Union[bool, str]]] = None
+    temperature: Optional[float] = Field(
+        1.0,
+        ge=0.0,
+        le=2.0,
+        description="Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.",
+    )
+    tool_choice: Optional[Literal["none", "auto", "required"]] = "none"
+    tools: Optional[List[Tool]] = None
+    top_logprobs: Optional[int] = Field(
+        None, ge=0, le=20, description="Number of top log probabilities to return."
+    )
+    top_p: Optional[float] = Field(
+        0.95,
+        ge=0.0,
+        le=1.0,
+        description="An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered.",
+    )
+
+
+class ChatCompletionRequest(BaseModel):
+    # Core Parameters
+    prompt_id: str
+    guardrail_id: Optional[int]
+    user_prompt: Union[str, List[Messages]]
+    image_url: Optional[str] = None
+    model_name: str = Field(default=settings.default_model)
+    # system_prompt: Optional[str] = None
+
+    # Model configuration captured via kwargs
+    model_config_params: Optional[ModelParams] = None
+
+
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, List
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException, RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
+
+from src.api.routers import (
+    chatcompletion_router,
+    generate_qna,
+    image_input_completion_router,
+    playground_router,
+    text_completion_router,
+    upload_file_router,
+)
+from src.config import settings
+
+from .logging_config import Logger
+
+allowed_origins: List[str] = settings.allowed_origins.split(",")
+allowed_methods: List[str] = settings.allow_methods.split(",")
+allowed_headers: List[str] = settings.allow_headers.split(",")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator:
+    """Lifespan handler for startup and shutdown events."""
+    Logger.info("Starting up application...")
+    yield
+    Logger.info("Shutting down application...")
+
+
+def create_app(version: str = "0.1.0") -> FastAPI:
+    env = settings.env
+    service_slug = settings.service_slug
+
+    app = FastAPI(
+        title=settings.title,
+        description=settings.description,
+        version=version,
+        swagger_ui_parameters={"defaultModelsExpandDepth": -1},
+        lifespan=lifespan,
+        root_path=f"/{env}/{service_slug}",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=settings.allow_credentials,
+        allow_methods=allowed_methods,
+        allow_headers=allowed_headers,
+    )
+
+    @app.middleware("http")
+    async def add_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = settings.allowed_origins
+        response.headers["Access-Control-Allow-Methods"] = settings.allow_methods
+        response.headers["Access-Control-Allow-Headers"] = settings.allow_headers
+        return response
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [
+                    {"loc": err["loc"], "msg": err["msg"], "type": err["type"]}
+                    for err in exc.errors()
+                ],
+                "body": exc.body,
+            },
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+
+    @app.get("/", tags=["Main"])
+    async def read_root():
+        return {"name": "Chat As Service, go to docs path for API detail"}
+
+    @app.get(f"{settings.api_common_prefix}{settings.health_check}", tags=["Main"])
+    async def health_check():
+        return {"status": "ok"}
+
+    app.include_router(
+        text_completion_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["COMPLETION"],
+    )
+    app.include_router(
+        image_input_completion_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["COMPLETION"],
+    )
+    app.include_router(
+        playground_router.router, prefix=settings.api_common_prefix, tags=["PLAYGROUND"]
+    )
+    app.include_router(
+        upload_file_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["UPLOAD_FILE"],
+    )
+    app.include_router(
+        generate_qna.router, prefix=settings.api_common_prefix, tags=["GENERATE_QNA"]
+    )
+    app.include_router(
+        chatcompletion_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["COMPLETION"],
+    )
+    return app
+
+
+app = create_app()
+
+
+import pytest  
+from fastapi.testclient import TestClient  
+from src.main import app  
+  
+client = TestClient(app)  
+  
+@pytest.fixture  
+def headers():  
+    return {"X-Session-ID": "test-session", "X-Usecase-ID": "test-usecase"}  
+  
+def test_text_completion(headers):  
+    response = client.post("/api/v1/chatcompletion", json={  
+        "model_name": "gemini-1.5-flash",  
+        "user_prompt": "Hello, how are you?"  
+    }, headers=headers)  
+    assert response.status_code == 200  
+    assert "choices" in response.json()  
+  
+def test_image_completion(headers):  
+    response = client.post("/api/v1/chatcompletion", json={  
+        "model_name": "gemini-1.5-flash",  
+        "user_prompt": "Describe this image",  
+        "image_url": "https://general-purpose-public.s3.ap-south-1.amazonaws.com/gemini_test_images/aadharCard.jpeg"  
+    }, headers=headers)  
+    assert response.status_code == 200  
+    assert "choices" in response.json()  
+  
+def test_missing_headers():  
+    response = client.post("/api/v1/chatcompletion", json={  
+        "model_name": "gemini-1.5-flash",  
+        "user_prompt": "Hello"  
+    })  
+    assert response.status_code == 422
