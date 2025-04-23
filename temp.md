@@ -1,18 +1,12 @@
-
-ruff.....................................................................Failed
-- hook id: ruff
-- exit code: 1
-
-Executable `ruff` not found
-
+uff.....................................................................Passed
 ruff-format..............................................................Failed
 - hook id: ruff-format
-- exit code: 1
+- files were modified by this hook
 
-Executable `ruff` not found
+1 file reformatted, 3 files left unchanged
 
 isort....................................................................Failed
 - hook id: isort
-- exit code: 1
+- files were modified by this hook
 
-Executable `isort` not found
+Fixing /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/chatcompletion_router.py
