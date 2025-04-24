@@ -1,98 +1,58 @@
-import pytest
-from fastapi.testclient import TestClient
-from src.main import app
-from src.models.embeddings_input import EmbeddingsRequest
+file /Users/epfn119476/Documents/HDFC/genai_platform_services/tests/unit/test_embeddings.py, line 81
+  def test_guardrails_validation_failure(mocker, embeddings_request):
+E       fixture 'mocker' not found
+>       available fixtures: _session_event_loop, anyio_backend, anyio_backend_name, anyio_backend_options, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, cov, doctest_namespace, embeddings_request, event_loop, event_loop_policy, monkeypatch, no_cover, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, tests/integration::<event_loop>, tests/unit/test_embeddings.py::<event_loop>, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory, unused_tcp_port, unused_tcp_port_factory, unused_udp_port, unused_udp_port_factory
+>       use 'pytest --fixtures [testpath]' for help on them.
 
-client = TestClient(app)
-
-
-@pytest.fixture
-def embeddings_request():
-    """Fixture for a valid EmbeddingsRequest payload."""
-    return {
-        "emdedd_id": "test123",
-        "user_input": "This is a test input.",
-        "model_name": "test-model",
-        "model_config_params": {"dimensions": 128, "encoding_format": "float"},
-    }
+/Users/epfn119476/Documents/HDFC/genai_platform_services/tests/unit/test_embeddings.py:81
 
 
-def test_read_root():
-    """Test the root endpoint."""
-    response = client.get("/")
-    assert response.status_code == 200
-    assert response.json() == {"name": "Chat As Service, go to docs path for API detail"}
+_________________________________________________________________________ test_health_check __________________________________________________________________________
 
+    def test_health_check():
+        """Test the health check endpoint."""
+        response = client.get("/v1/api/health")
+>       assert response.status_code == 200
+E       assert 404 == 200
+E        +  where 404 = <Response [404 Not Found]>.status_code
 
-def test_health_check():
-    """Test the health check endpoint."""
-    response = client.get("/api/v1/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+tests/unit/test_embeddings.py:30: AssertionError
+_______________________________________________________________ test_embeddings_endpoint_valid_headers _______________________________________________________________
 
+embeddings_request = {'emdedd_id': 'test123', 'model_config_params': {'dimensions': 128, 'encoding_format': 'float'}, 'model_name': 'BAAI/bge-m3', 'user_input': 'This is a test input.'}
 
-def test_embeddings_endpoint_valid_headers(embeddings_request):
-    """Test the embeddings endpoint with valid headers."""
-    headers = {
-        "X-Session-ID": "session123",
-        "X-Usecase-ID": "usecase123",
-        "X-Base-API-Key": "test-api-key",
-    }
-    response = client.post(
-        "/api/v1/embedding",
-        json=embeddings_request,
-        headers=headers,
-    )
-    assert response.status_code == 200 or response.status_code == 400
+    def test_embeddings_endpoint_valid_headers(embeddings_request):
+        """Test the embeddings endpoint with valid headers."""
+        headers = {
+            "X-Session-ID": "session123",
+            "X-Usecase-ID": "1234",
+            "X-Base-API-Key": "sk-MpFcAnO34r2gg5d1KA_QAg",
+        }
+        response = client.post(
+            "/v1/api/embeddings",
+            json=embeddings_request,
+            headers=headers,
+        )
+>       assert response.status_code == 200 or response.status_code == 400
+E       assert (422 == 200 or 422 == 400)
+E        +  where 422 = <Response [422 Unprocessable Entity]>.status_code
+E        +  and   422 = <Response [422 Unprocessable Entity]>.status_code
 
+tests/unit/test_embeddings.py:46: AssertionError
+______________________________________________________________ test_embeddings_endpoint_missing_headers ______________________________________________________________
 
-def test_embeddings_endpoint_missing_headers(embeddings_request):
-    """Test the embeddings endpoint with missing headers."""
-    headers = {"X-Session-ID": "session123"}  # Missing X-Usecase-ID
-    response = client.post(
-        "/api/v1/embedding",
-        json=embeddings_request,
-        headers=headers,
-    )
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Missing X-Session-ID or X-Usecase-ID headers"
+embeddings_request = {'emdedd_id': 'test123', 'model_config_params': {'dimensions': 128, 'encoding_format': 'float'}, 'model_name': 'BAAI/bge-m3', 'user_input': 'This is a test input.'}
 
+    def test_embeddings_endpoint_missing_headers(embeddings_request):
+        """Test the embeddings endpoint with missing headers."""
+        headers = {"X-Session-ID": "session123"}  # Missing X-Usecase-ID
+        response = client.post(
+            "/v1/api/embeddings",
+            json=embeddings_request,
+            headers=headers,
+        )
+>       assert response.status_code == 400
+E       assert 422 == 400
+E        +  where 422 = <Response [422 Unprocessable Entity]>.status_code
 
-def test_embeddings_endpoint_invalid_input():
-    """Test the embeddings endpoint with invalid input."""
-    headers = {
-        "X-Session-ID": "session123",
-        "X-Usecase-ID": "usecase123",
-        "X-Base-API-Key": "test-api-key",
-    }
-    invalid_request = {
-        "emdedd_id": "test123",
-        "user_input": 12345,  # Invalid type
-        "model_name": "test-model",
-    }
-    response = client.post(
-        "/api/v1/embedding",
-        json=invalid_request,
-        headers=headers,
-    )
-    assert response.status_code == 422
-
-
-def test_guardrails_validation_failure(mocker, embeddings_request):
-    """Test guardrails validation failure."""
-    headers = {
-        "X-Session-ID": "session123",
-        "X-Usecase-ID": "usecase123",
-        "X-Base-API-Key": "test-api-key",
-    }
-
-    # Mock scan_prompt to return a failure response
-    mocker.patch("src.utility.guardrails.scan_prompt", return_value={"is_valid": False})
-
-    response = client.post(
-        "/api/v1/embedding",
-        json=embeddings_request,
-        headers=headers,
-    )
-    assert response.status_code == 400
-    assert response.json()["error"] == "Input Guardrails validation failed"
+tests/unit/test_embeddings.py:57: AssertionError
