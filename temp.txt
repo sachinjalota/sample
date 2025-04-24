@@ -1,277 +1,98 @@
->> main.py
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, List
-
-from fastapi import FastAPI, Request
-from fastapi.exceptions import HTTPException, RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse
-
-from src.api.routers import (
-    chatcompletion_router,
-    embeddings_router,
-    generate_qna,
-    image_input_completion_router,
-    playground_router,
-    text_completion_router,
-    upload_file_router,
-)
-from src.config import settings
-
-from .logging_config import Logger
-
-allowed_origins: List[str] = settings.allowed_origins.split(",")
-allowed_methods: List[str] = settings.allow_methods.split(",")
-allowed_headers: List[str] = settings.allow_headers.split(",")
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator:
-    """Lifespan handler for startup and shutdown events."""
-    Logger.info("Starting up application...")
-    yield
-    Logger.info("Shutting down application...")
-
-
-def create_app(version: str = "0.1.0") -> FastAPI:
-    env = settings.env
-    service_slug = settings.service_slug
-
-    app = FastAPI(
-        title=settings.title,
-        description=settings.description,
-        version=version,
-        swagger_ui_parameters={"defaultModelsExpandDepth": -1},
-        lifespan=lifespan,
-        root_path=f"/{env}/{service_slug}",
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=settings.allow_credentials,
-        allow_methods=allowed_methods,
-        allow_headers=allowed_headers,
-    )
-
-    @app.middleware("http")
-    async def add_headers(request: Request, call_next):
-        response = await call_next(request)
-        response.headers["Access-Control-Allow-Origin"] = settings.allowed_origins
-        response.headers["Access-Control-Allow-Methods"] = settings.allow_methods
-        response.headers["Access-Control-Allow-Headers"] = settings.allow_headers
-        return response
-
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(
-        request: Request, exc: RequestValidationError
-    ):
-        return JSONResponse(
-            status_code=422,
-            content={
-                "detail": [
-                    {"loc": err["loc"], "msg": err["msg"], "type": err["type"]}
-                    for err in exc.errors()
-                ],
-                "body": exc.body,
-            },
-        )
-
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
-
-    @app.get("/", tags=["Main"])
-    async def read_root():
-        return {"name": "Chat As Service, go to docs path for API detail"}
-
-    @app.get(f"{settings.api_common_prefix}{settings.health_check}", tags=["Main"])
-    async def health_check():
-        return {"status": "ok"}
-
-    app.include_router(
-        text_completion_router.router,
-        prefix=settings.api_common_prefix,
-        tags=["COMPLETION"],
-    )
-    app.include_router(
-        image_input_completion_router.router,
-        prefix=settings.api_common_prefix,
-        tags=["COMPLETION"],
-    )
-    app.include_router(
-        playground_router.router, prefix=settings.api_common_prefix, tags=["PLAYGROUND"]
-    )
-    app.include_router(
-        upload_file_router.router,
-        prefix=settings.api_common_prefix,
-        tags=["UPLOAD_FILE"],
-    )
-    app.include_router(
-        generate_qna.router, prefix=settings.api_common_prefix, tags=["GENERATE_QNA"]
-    )
-    app.include_router(
-        chatcompletion_router.router,
-        prefix=settings.api_common_prefix,
-        tags=["COMPLETION"],
-    )
-    app.include_router(
-        embeddings_router.router,
-        prefix=settings.api_common_prefix,
-        tags=["EMBEDDING"],
-    )
-    return app
-
-
-app = create_app()
-
-
->> embedding_input.py
-from typing import List, Optional, Union, Literal
-from pydantic import BaseModel, Field
-from src.config import settings
-
-class ModelParams(BaseModel):
-    dimensions: Optional[int] = Field(
-        None,
-        description="The number of dimensions the resulting output embeddings should have."
-    )
-    encoding_format: Optional[Literal["float", "base64"]] = Field(
-        "float",
-        descritption= "The format to return the embeddings in. Can be either float or base64."
-    )
-    user: Optional[str] = Field(
-        None,
-        description="A unique identifier representing your end-user, which can help to monitor and detect abuse."
-    )
-
-class EmbeddingsRequest(BaseModel):
-    # Core Parameters
-    emdedd_id: str = Field(..., description="Unique identifier for the embeddings generation request.")
-    guardrail_id: Optional[int] = Field(
-        None,
-        description="Optional guardrail ID to validate the prompt or response against specific rules.",
-    )
-    user_input: Union[str, List[str]] = Field(
-        ...,
-        description="Input text to embed, encoded as a string or array of tokens. To embed multiple inputs in a single request, pass an array of strings or array of token arrays.",
-    )
-    model_name: str = Field(
-        default=settings.default_model_embeddings,
-        descriptiop="The name of the model to use for generating the embeddings. Defaults to the value specified in settings.",
-    )
-
-    # Model configuration captured via kwargs
-    model_config_params: Optional[ModelParams] = Field(
-        None, description="Optional parameters to configure the model's behavior."
-    )
-
->> embeddings_router.py
-import base64
-import traceback
-from typing import Union
-
-import httpx
-import openai
-import opik
-import requests
-from fastapi import APIRouter, Header, HTTPException, status
-from fastapi.responses import JSONResponse
-
-from src.config import settings
-from src.logging_config import Logger
+import pytest
+from fastapi.testclient import TestClient
+from src.main import app
 from src.models.embeddings_input import EmbeddingsRequest
-from src.utility.guardrails import scan_prompt
 
-router = APIRouter()
-logger = Logger.create_logger("embed_gen")
+client = TestClient(app)
 
-@router.post(
-    f"{settings.embedding_endpoint}",
-    summary="",
-    response_description="",
-    status_code=status.HTTP_200_OK,
-)
-@opik.track
-async def chatcompletion(
-    request: EmbeddingsRequest,
-    x_session_id: str = Header(..., description="Session ID for tracking."),
-    x_usecase_id: str = Header(..., description="Usecase ID for tracking."),
-    x_base_api_key: Union[str, None] = Header(
-        None, description="Optional Base API Key for authorisation."
-    ),
-):
-    if not x_session_id or not x_usecase_id:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail="Missing X-Session-ID or X-Usecase-ID headers",
-        )
 
-    try:
-        verify = False if settings.env != "PROD" else True
+@pytest.fixture
+def embeddings_request():
+    """Fixture for a valid EmbeddingsRequest payload."""
+    return {
+        "emdedd_id": "test123",
+        "user_input": "This is a test input.",
+        "model_name": "test-model",
+        "model_config_params": {"dimensions": 128, "encoding_format": "float"},
+    }
 
-        if isinstance(request.user_input, str):
-            # Run guardrails validation for user prompt
-            guardrails_input_result = scan_prompt(
-                prompt=request.user_input,
-                session_id=x_session_id,
-                usecase_id=x_usecase_id,
-                guardrail_id=request.guardrail_id
-                or settings.default_import_guardrail_id,
-            )
-            if not guardrails_input_result.get("is_valid", False):
-                return JSONResponse(
-                    content={
-                        "error": "Input Guardrails validation failed",
-                        "details": guardrails_input_result,
-                    },
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
 
-        elif isinstance(request.user_input, list):
-            for user_cont in request.user_input:
-                guardrails_input_result = scan_prompt(
-                    prompt=user_cont,
-                    session_id=x_session_id,
-                    usecase_id=x_usecase_id,
-                    guardrail_id=request.guardrail_id
-                    or settings.default_import_guardrail_id,
-                )
-                if not guardrails_input_result.get("is_valid", False):
-                    return JSONResponse(
-                        content={
-                            "error": "Input Guardrails validation failed",
-                            "details": guardrails_input_result,
-                        },
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                    )
+def test_read_root():
+    """Test the root endpoint."""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json() == {"name": "Chat As Service, go to docs path for API detail"}
 
-        else:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                detail="Inavlid format of user_promt. It must be either string or list of messages.",
-            )
 
-        payload = {"model": request.model_name, "input": request.user_input}
+def test_health_check():
+    """Test the health check endpoint."""
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
-        if request.model_config_params:
-            payload.update(request.model_config_params)
 
-        http_client = httpx.Client(http2=True, verify=verify)
-        client = openai.OpenAI(
-            api_key=x_base_api_key,
-            base_url=settings.base_api_url,
-            http_client=http_client,
-        )
+def test_embeddings_endpoint_valid_headers(embeddings_request):
+    """Test the embeddings endpoint with valid headers."""
+    headers = {
+        "X-Session-ID": "session123",
+        "X-Usecase-ID": "usecase123",
+        "X-Base-API-Key": "test-api-key",
+    }
+    response = client.post(
+        "/api/v1/embedding",
+        json=embeddings_request,
+        headers=headers,
+    )
+    assert response.status_code == 200 or response.status_code == 400
 
-        response = client.embeddings.create(**payload)
 
-        logger.info(f"Embeddings response generated: {response}")
+def test_embeddings_endpoint_missing_headers(embeddings_request):
+    """Test the embeddings endpoint with missing headers."""
+    headers = {"X-Session-ID": "session123"}  # Missing X-Usecase-ID
+    response = client.post(
+        "/api/v1/embedding",
+        json=embeddings_request,
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Missing X-Session-ID or X-Usecase-ID headers"
 
-        return response.dict()
 
-    except Exception:
-        logger.error(f"## Error: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500, detail=f"## Error: {traceback.format_exc()}"
-        )
+def test_embeddings_endpoint_invalid_input():
+    """Test the embeddings endpoint with invalid input."""
+    headers = {
+        "X-Session-ID": "session123",
+        "X-Usecase-ID": "usecase123",
+        "X-Base-API-Key": "test-api-key",
+    }
+    invalid_request = {
+        "emdedd_id": "test123",
+        "user_input": 12345,  # Invalid type
+        "model_name": "test-model",
+    }
+    response = client.post(
+        "/api/v1/embedding",
+        json=invalid_request,
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+def test_guardrails_validation_failure(mocker, embeddings_request):
+    """Test guardrails validation failure."""
+    headers = {
+        "X-Session-ID": "session123",
+        "X-Usecase-ID": "usecase123",
+        "X-Base-API-Key": "test-api-key",
+    }
+
+    # Mock scan_prompt to return a failure response
+    mocker.patch("src.utility.guardrails.scan_prompt", return_value={"is_valid": False})
+
+    response = client.post(
+        "/api/v1/embedding",
+        json=embeddings_request,
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "Input Guardrails validation failed"
