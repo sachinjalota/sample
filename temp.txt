@@ -1,179 +1,277 @@
-Here's an updated version of the `test_completion.py` file with additional test cases for different variations of request headers and configurations for the `model_config_params` parameters. I will also define the `model_config_params` fields and descriptions in the response.
+>> main.py
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, List
 
----
+from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException, RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
 
-### Updated `test_completion.py`
+from src.api.routers import (
+    chatcompletion_router,
+    embeddings_router,
+    generate_qna,
+    image_input_completion_router,
+    playground_router,
+    text_completion_router,
+    upload_file_router,
+)
+from src.config import settings
 
-```python
-import pytest
-from fastapi.testclient import TestClient
-from src.main import app
+from .logging_config import Logger
 
-client = TestClient(app)
+allowed_origins: List[str] = settings.allowed_origins.split(",")
+allowed_methods: List[str] = settings.allow_methods.split(",")
+allowed_headers: List[str] = settings.allow_headers.split(",")
 
-@pytest.fixture
-def headers():
-    return {"X-Session-ID": "test-session", "X-Usecase-ID": "test-usecase"}
 
-@pytest.fixture
-def headers_with_api_key():
-    return {
-        "X-Session-ID": "test-session",
-        "X-Usecase-ID": "test-usecase",
-        "X-Base-API-Key": "test-api-key",
-    }
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator:
+    """Lifespan handler for startup and shutdown events."""
+    Logger.info("Starting up application...")
+    yield
+    Logger.info("Shutting down application...")
 
-@pytest.fixture
-def incomplete_headers():
-    return {"X-Session-ID": "test-session"}  # Missing "X-Usecase-ID"
 
-def test_text_completion(headers):
-    response = client.post(
-        "/api/v1/chatcompletion",
-        json={
-            "model_name": "gemini-1.5-flash",
-            "user_prompt": "Hello, how are you?",
-        },
-        headers=headers,
+def create_app(version: str = "0.1.0") -> FastAPI:
+    env = settings.env
+    service_slug = settings.service_slug
+
+    app = FastAPI(
+        title=settings.title,
+        description=settings.description,
+        version=version,
+        swagger_ui_parameters={"defaultModelsExpandDepth": -1},
+        lifespan=lifespan,
+        root_path=f"/{env}/{service_slug}",
     )
-    assert response.status_code == 200
-    assert "choices" in response.json()
 
-def test_text_completion_with_model_config(headers):
-    response = client.post(
-        "/api/v1/chatcompletion",
-        json={
-            "model_name": "gemini-1.5-flash",
-            "user_prompt": "Provide a summary of this text.",
-            "model_config_params": {
-                "max_completion_tokens": 50,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "n": 2,
-                "presence_penalty": 0.6,
-                "frequency_penalty": 0.2,
-            },
-        },
-        headers=headers,
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=settings.allow_credentials,
+        allow_methods=allowed_methods,
+        allow_headers=allowed_headers,
     )
-    assert response.status_code == 200
-    assert "choices" in response.json()
 
-def test_image_completion(headers_with_api_key):
-    response = client.post(
-        "/api/v1/chatcompletion",
-        json={
-            "model_name": "gemini-1.5-flash",
-            "user_prompt": "Describe this image",
-            "image_url": "https://general-purpose-public.s3.ap-south-1.amazonaws.com/gemini_test_images/aadharCard.jpeg",
-        },
-        headers=headers_with_api_key,
-    )
-    assert response.status_code == 200
-    assert "choices" in response.json()
+    @app.middleware("http")
+    async def add_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = settings.allowed_origins
+        response.headers["Access-Control-Allow-Methods"] = settings.allow_methods
+        response.headers["Access-Control-Allow-Headers"] = settings.allow_headers
+        return response
 
-def test_invalid_headers():
-    response = client.post(
-        "/api/v1/chatcompletion",
-        json={
-            "model_name": "gemini-1.5-flash",
-            "user_prompt": "Hello",
-        },
-    )
-    assert response.status_code == 422
-
-def test_incomplete_headers(incomplete_headers):
-    response = client.post(
-        "/api/v1/chatcompletion",
-        json={
-            "model_name": "gemini-1.5-flash",
-            "user_prompt": "Hello",
-        },
-        headers=incomplete_headers,
-    )
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Missing X-Session-ID or X-Usecase-ID headers"
-
-def test_text_completion_with_invalid_model_config(headers):
-    response = client.post(
-        "/api/v1/chatcompletion",
-        json={
-            "model_name": "gemini-1.5-flash",
-            "user_prompt": "Generate some output.",
-            "model_config_params": {
-                "max_completion_tokens": 5000,  # Invalid: exceeds allowed range
-                "temperature": -1.0,  # Invalid: below allowed range
-            },
-        },
-        headers=headers,
-    )
-    assert response.status_code == 422  # Expect validation error
-
-def test_tool_usage_with_model_config(headers_with_api_key):
-    response = client.post(
-        "/api/v1/chatcompletion",
-        json={
-            "model_name": "gemini-1.5-flash",
-            "user_prompt": "What tools can I use?",
-            "model_config_params": {
-                "tool_choice": "auto",
-                "tools": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "search_tool",
-                            "description": "Performs a web search",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "query": {
-                                        "type": "string",
-                                        "description": "Search query",
-                                    }
-                                },
-                                "required": ["query"],
-                            },
-                        },
-                    }
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [
+                    {"loc": err["loc"], "msg": err["msg"], "type": err["type"]}
+                    for err in exc.errors()
                 ],
+                "body": exc.body,
             },
-        },
-        headers=headers_with_api_key,
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+
+    @app.get("/", tags=["Main"])
+    async def read_root():
+        return {"name": "Chat As Service, go to docs path for API detail"}
+
+    @app.get(f"{settings.api_common_prefix}{settings.health_check}", tags=["Main"])
+    async def health_check():
+        return {"status": "ok"}
+
+    app.include_router(
+        text_completion_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["COMPLETION"],
     )
-    assert response.status_code == 200
-    assert "choices" in response.json()
+    app.include_router(
+        image_input_completion_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["COMPLETION"],
+    )
+    app.include_router(
+        playground_router.router, prefix=settings.api_common_prefix, tags=["PLAYGROUND"]
+    )
+    app.include_router(
+        upload_file_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["UPLOAD_FILE"],
+    )
+    app.include_router(
+        generate_qna.router, prefix=settings.api_common_prefix, tags=["GENERATE_QNA"]
+    )
+    app.include_router(
+        chatcompletion_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["COMPLETION"],
+    )
+    app.include_router(
+        embeddings_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["EMBEDDING"],
+    )
+    return app
 
-```
 
----
+app = create_app()
 
-### Description of `model_config_params` Fields
 
-The `model_config_params` allows customization of the behavior of the model. Below are its fields and their descriptions:
+>> embedding_input.py
+from typing import List, Optional, Union, Literal
+from pydantic import BaseModel, Field
+from src.config import settings
 
-| Field Name              | Type                                   | Description                                                                                                                                            |
-|-------------------------|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `frequency_penalty`     | `float` (range: -2.0 to 2.0)          | Penalizes repeated tokens based on their frequency in the text. Positive values reduce repetition.                                                     |
-| `logit_bias`            | `Dict[str, int]`                      | Adjusts the likelihood of specific tokens appearing in the output.                                                                                     |
-| `logprobs`              | `bool`                                | If `True`, returns log probabilities of tokens.                                                                                                       |
-| `max_completion_tokens` | `int` (minimum: 1)                    | Maximum number of tokens to generate in the completion.                                                                                               |
-| `metadata`              | `Dict[str, str]`                      | Additional metadata about the request.                                                                                                                |
-| `modalities`            | `List[Literal["text", "audio"]]`      | Specifies the input/output modalities.                                                                                                                |
-| `n`                     | `int`                                 | Number of completions to generate per request.                                                                                                        |
-| `presence_penalty`      | `float` (range: -2.0 to 2.0)          | Penalizes repeated topics in the text. Positive values encourage diversity in the output.                                                             |
-| `response_format`       | `Dict[str, Union[str, Dict[str, str]]]` | Specifies the format of the response.                                                                                                                 |
-| `seed`                  | `int`                                 | Seed for deterministic sampling.                                                                                                                      |
-| `service_tier`          | `Literal["auto", "default", "flex"]`  | Specifies the service tier for the model.                                                                                                             |
-| `stop`                  | `Union[str, List[str]]`               | Sequence(s) at which the model will stop generating further tokens.                                                                                   |
-| `store`                 | `bool`                                | If `True`, stores the output of the completion.                                                                                                       |
-| `stream`                | `bool`                                | If `True`, streams responses as they are generated.                                                                                                   |
-| `stream_options`        | `Dict[str, Union[bool, str]]`         | Additional options for streaming responses.                                                                                                           |
-| `temperature`           | `float` (range: 0.0 to 2.0)           | Controls randomness in the output. Lower values result in more deterministic output, while higher values increase randomness.                          |
-| `tool_choice`           | `Literal["none", "auto", "required"]` | Specifies whether to use tools during the completion process.                                                                                         |
-| `tools`                 | `List[Tool]`                         | List of tools to be used. Each tool contains a name, description, and parameters (type, properties, and required fields).                              |
-| `top_logprobs`          | `int` (range: 0 to 20)                | Number of top log probabilities to return.                                                                                                            |
-| `top_p`                 | `float` (range: 0.0 to 1.0)           | Nucleus sampling parameter. Considers tokens with cumulative probability mass up to `top_p`.                                                          |
+class ModelParams(BaseModel):
+    dimensions: Optional[int] = Field(
+        None,
+        description="The number of dimensions the resulting output embeddings should have."
+    )
+    encoding_format: Optional[Literal["float", "base64"]] = Field(
+        "float",
+        descritption= "The format to return the embeddings in. Can be either float or base64."
+    )
+    user: Optional[str] = Field(
+        None,
+        description="A unique identifier representing your end-user, which can help to monitor and detect abuse."
+    )
 
----
+class EmbeddingsRequest(BaseModel):
+    # Core Parameters
+    emdedd_id: str = Field(..., description="Unique identifier for the embeddings generation request.")
+    guardrail_id: Optional[int] = Field(
+        None,
+        description="Optional guardrail ID to validate the prompt or response against specific rules.",
+    )
+    user_input: Union[str, List[str]] = Field(
+        ...,
+        description="Input text to embed, encoded as a string or array of tokens. To embed multiple inputs in a single request, pass an array of strings or array of token arrays.",
+    )
+    model_name: str = Field(
+        default=settings.default_model_embeddings,
+        descriptiop="The name of the model to use for generating the embeddings. Defaults to the value specified in settings.",
+    )
 
-This test script ensures that all variations of headers and `model_config_params` are tested, and validation is enforced for invalid configurations. You can extend it further by adding more edge cases as needed.
+    # Model configuration captured via kwargs
+    model_config_params: Optional[ModelParams] = Field(
+        None, description="Optional parameters to configure the model's behavior."
+    )
+
+>> embeddings_router.py
+import base64
+import traceback
+from typing import Union
+
+import httpx
+import openai
+import opik
+import requests
+from fastapi import APIRouter, Header, HTTPException, status
+from fastapi.responses import JSONResponse
+
+from src.config import settings
+from src.logging_config import Logger
+from src.models.embeddings_input import EmbeddingsRequest
+from src.utility.guardrails import scan_prompt
+
+router = APIRouter()
+logger = Logger.create_logger("embed_gen")
+
+@router.post(
+    f"{settings.embedding_endpoint}",
+    summary="",
+    response_description="",
+    status_code=status.HTTP_200_OK,
+)
+@opik.track
+async def chatcompletion(
+    request: EmbeddingsRequest,
+    x_session_id: str = Header(..., description="Session ID for tracking."),
+    x_usecase_id: str = Header(..., description="Usecase ID for tracking."),
+    x_base_api_key: Union[str, None] = Header(
+        None, description="Optional Base API Key for authorisation."
+    ),
+):
+    if not x_session_id or not x_usecase_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-Session-ID or X-Usecase-ID headers",
+        )
+
+    try:
+        verify = False if settings.env != "PROD" else True
+
+        if isinstance(request.user_input, str):
+            # Run guardrails validation for user prompt
+            guardrails_input_result = scan_prompt(
+                prompt=request.user_input,
+                session_id=x_session_id,
+                usecase_id=x_usecase_id,
+                guardrail_id=request.guardrail_id
+                or settings.default_import_guardrail_id,
+            )
+            if not guardrails_input_result.get("is_valid", False):
+                return JSONResponse(
+                    content={
+                        "error": "Input Guardrails validation failed",
+                        "details": guardrails_input_result,
+                    },
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+        elif isinstance(request.user_input, list):
+            for user_cont in request.user_input:
+                guardrails_input_result = scan_prompt(
+                    prompt=user_cont,
+                    session_id=x_session_id,
+                    usecase_id=x_usecase_id,
+                    guardrail_id=request.guardrail_id
+                    or settings.default_import_guardrail_id,
+                )
+                if not guardrails_input_result.get("is_valid", False):
+                    return JSONResponse(
+                        content={
+                            "error": "Input Guardrails validation failed",
+                            "details": guardrails_input_result,
+                        },
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        else:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Inavlid format of user_promt. It must be either string or list of messages.",
+            )
+
+        payload = {"model": request.model_name, "input": request.user_input}
+
+        if request.model_config_params:
+            payload.update(request.model_config_params)
+
+        http_client = httpx.Client(http2=True, verify=verify)
+        client = openai.OpenAI(
+            api_key=x_base_api_key,
+            base_url=settings.base_api_url,
+            http_client=http_client,
+        )
+
+        response = client.embeddings.create(**payload)
+
+        logger.info(f"Embeddings response generated: {response}")
+
+        return response.dict()
+
+    except Exception:
+        logger.error(f"## Error: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, detail=f"## Error: {traceback.format_exc()}"
+        )
