@@ -1,210 +1,165 @@
-import pytest
-from unittest.mock import MagicMock
+=================================================================== FAILURES ======================================================================================
+__________________________________________________________________________ test_delete_collection_success ___________________________________________________________________________
 
-from fastapi import HTTPException
-from fastapi.testclient import TestClient
+client = <starlette.testclient.TestClient object at 0x124f2d490>, delete_collection_payload = {'collection_uid': 'test-collection-uuid'}
+valid_headers = {'x-base-api-key': 'test-api-key', 'x-session-id': 'test-session'}, mocker = <pytest_mock.plugin.MockerFixture object at 0x1252c0e50>
 
-from src.api.deps import validate_headers_and_api_key, validate_collection_access
-from src.main import app
-from src.models.headers import HeaderInformation
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Fixture: TestClient
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Fixture: valid headers
-@pytest.fixture
-def valid_headers():
-    return {
-        "x-session-id": "test-session",
-        "x-base-api-key": "test-api-key"
-    }
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Fixture: a HeaderInformation instance to return from validate_headers_and_api_key
-@pytest.fixture
-def valid_header_info():
-    return HeaderInformation(
-        x_session_id="test-session",
-        x_base_api_key="test-api-key"
-    )
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Fixture: override the two deps so they never actually make HTTP calls
-@pytest.fixture(autouse=True)
-def override_dependencies(valid_header_info):
-    # override validate_headers_and_api_key → returns our pre-made HeaderInformation
-    app.dependency_overrides[validate_headers_and_api_key] = lambda: valid_header_info
-
-    # override validate_collection_access → signature must match (base_api_key, collection_name)
-    app.dependency_overrides[validate_collection_access] = lambda base_api_key, collection_uid: None
-
-    yield
-
-    app.dependency_overrides = {}
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Fixtures: payloads
-@pytest.fixture
-def create_collection_payload():
-    return {
-        "collection_entries": [
-            {
-                "channel_id": 1,
-                "usecase_id": "test-usecase",
-                "collection_name": "test-collection",
-                "model": "test-model",
-            }
-        ]
-    }
-
-
-@pytest.fixture
-def delete_collection_payload():
-    return {"collection_uid": "test-collection-uuid"}
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Test #1: happy‐path create_collection
-def test_create_collection_success(client, create_collection_payload, valid_headers, mocker):
-    # 1) Fake out the session factory to produce a context manager
-    fake_session = MagicMock()
-    fake_cm = MagicMock()
-    fake_cm.__enter__.return_value = fake_session
-    fake_cm.__exit__.return_value = None
-    mocker.patch(
-        "src.api.collection_router.create_session_platform",
-        return_value=fake_cm,
-    )
-
-    # 2) Fake the embedding‐model lookup to return an integer dimension
-    mocker.patch(
-        "src.api.collection_router.check_embedding_model",
-        return_value=128
-    )
-
-    # 3) Fake document‐model creation (no‐op)
-    mocker.patch(
-        "src.api.collection_router.create_document_model",
-        return_value=None
-    )
-
-    # Exercise the endpoint
-    resp = client.post(
-        "/v1/api/create_collection",
-        json=create_collection_payload,
-        headers=valid_headers
-    )
-    assert resp.status_code == 200, resp.text
-
-    data = resp.json()
-    assert "collections" in data
-    assert len(data["collections"]) == 1
-    assert data["collections"][0]["collection_name"] == "test-collection"
-    assert "uuid" in data["collections"][0]
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Test #2: model lookup fails → 400
-def test_create_collection_model_not_found(client, create_collection_payload, valid_headers, mocker):
-    # patch session‐factory so the "with" doesn't blow up
-    fake_cm = MagicMock()
-    fake_cm.__enter__.return_value = MagicMock()
-    fake_cm.__exit__.return_value = None
-    mocker.patch(
-        "src.api.collection_router.create_session_platform",
-        return_value=fake_cm,
-    )
-
-    # now make check_embedding_model raise
-    mocker.patch(
-        "src.api.collection_router.check_embedding_model",
-        side_effect=HTTPException(
-            status_code=400,
-            detail="Model 'test-model' not found in embedding_models table."
+    def test_delete_collection_success(client, delete_collection_payload, valid_headers, mocker):
+        fake_session = MagicMock()
+        fake_cm = MagicMock()
+        fake_cm.__enter__.return_value = fake_session
+        fake_cm.__exit__.return_value = None
+        mocker.patch(
+            "src.api.routers.collection_router.create_session_platform",
+            return_value=fake_cm,
         )
-    )
+    
+        fake_session.execute.return_value.scalar_one_or_none.return_value = MagicMock(uuid="test-collection-uuid")
+    
+        mocker.patch(
+            "src.repository.document_repository.DocumentRepository.check_table_exists",
+            return_value=True
+        )
+        mocker.patch(
+            "src.repository.document_repository.DocumentRepository.delete_collection",
+            return_value=None
+        )
+    
+        resp = client.request("DELETE", "/v1/api/delete_collection",
+                              json=delete_collection_payload, headers=valid_headers
+                              )
+>       assert resp.status_code == 200, resp.text
+E       AssertionError: {"error":"Invalid or unauthorized API key"}
+E       assert 401 == 200
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
 
-    resp = client.post(
-        "/v1/api/create_collection",
-        json=create_collection_payload,
-        headers=valid_headers
-    )
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "Model 'test-model' not found in embedding_models table."
+tests/unit/api/router/test_collection_router.py:145: AssertionError
+------------------------------------------------------------------------------- Captured stdout call --------------------------------------------------------------------------------
+[ERROR] [2025-06-12 14:04:47,166] [src.main] [137] Http error: 401: Invalid or unauthorized API key
+Traceback (most recent call last):
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/starlette/routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/collection_router.py", line 75, in delete_collection
+    await validate_collection_access(header_information.x_base_api_key, request.collection_uid)
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/deps.py", line 177, in validate_collection_access
+    raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
+fastapi.exceptions.HTTPException: 401: Invalid or unauthorized API key
+--------------------------------------------------------------------------------- Captured log call ---------------------------------------------------------------------------------
+ERROR    src.main:main.py:137 Http error: 401: Invalid or unauthorized API key
+Traceback (most recent call last):
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/starlette/routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/collection_router.py", line 75, in delete_collection
+    await validate_collection_access(header_information.x_base_api_key, request.collection_uid)
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/deps.py", line 177, in validate_collection_access
+    raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
+fastapi.exceptions.HTTPException: 401: Invalid or unauthorized API key
+______________________________________________________________________ test_delete_collection_table_not_found _______________________________________________________________________
 
+client = <starlette.testclient.TestClient object at 0x124fbc110>, delete_collection_payload = {'collection_uid': 'test-collection-uuid'}
+valid_headers = {'x-base-api-key': 'test-api-key', 'x-session-id': 'test-session'}, mocker = <pytest_mock.plugin.MockerFixture object at 0x125401e10>
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Test #3: happy‐path delete_collection
-def test_delete_collection_success(client, delete_collection_payload, valid_headers, mocker):
-    # fake session‐factory
-    fake_session = MagicMock()
-    fake_cm = MagicMock()
-    fake_cm.__enter__.return_value = fake_session
-    fake_cm.__exit__.return_value = None
-    mocker.patch(
-        "src.api.collection_router.create_session_platform",
-        return_value=fake_cm,
-    )
+    def test_delete_collection_table_not_found(client, delete_collection_payload, valid_headers, mocker):
+        fake_session = MagicMock()
+        fake_cm = MagicMock()
+        fake_cm.__enter__.return_value = fake_session
+        fake_cm.__exit__.return_value = None
+        mocker.patch(
+            "src.api.routers.collection_router.create_session_platform",
+            return_value=fake_cm,
+        )
+    
+        fake_session.execute.return_value.scalar_one_or_none.return_value = MagicMock(uuid="test-collection-uuid")
+    
+        mocker.patch(
+            "src.repository.document_repository.DocumentRepository.check_table_exists",
+            return_value=False
+        )
+    
+        resp = client.request("DELETE", "/v1/api/delete_collection",
+                              json=delete_collection_payload, headers=valid_headers
+                              )
+>       assert resp.status_code == 404
+E       assert 401 == 404
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
 
-    # patch out the SQLAlchemy select → pretend collection exists
-    fake_session.execute.return_value.scalar_one_or_none.return_value = MagicMock(uuid="test-collection-uuid")
+tests/unit/api/router/test_collection_router.py:171: AssertionError
+------------------------------------------------------------------------------- Captured stdout call --------------------------------------------------------------------------------
+[ERROR] [2025-06-12 14:04:47,309] [src.main] [137] Http error: 401: Invalid or unauthorized API key
+Traceback (most recent call last):
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/starlette/routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/collection_router.py", line 75, in delete_collection
+    await validate_collection_access(header_information.x_base_api_key, request.collection_uid)
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/deps.py", line 177, in validate_collection_access
+    raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
+fastapi.exceptions.HTTPException: 401: Invalid or unauthorized API key
+--------------------------------------------------------------------------------- Captured log call ---------------------------------------------------------------------------------
+ERROR    src.main:main.py:137 Http error: 401: Invalid or unauthorized API key
+Traceback (most recent call last):
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/starlette/routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/collection_router.py", line 75, in delete_collection
+    await validate_collection_access(header_information.x_base_api_key, request.collection_uid)
+  File "/Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/deps.py", line 177, in validate_collection_access
+    raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
+fastapi.exceptions.HTTPException: 401: Invalid or unauthorized API key
+================================================================================= warnings summary ==================================================================================
+src/db/base.py:3
+  /Users/epfn119476/Documents/HDFC/genai_platform_services/src/db/base.py:3: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    BaseDBA = declarative_base()
 
-    # patch DocumentRepository methods
-    mocker.patch(
-        "src.repository.document_repository.DocumentRepository.check_table_exists",
-        return_value=True
-    )
-    mocker.patch(
-        "src.repository.document_repository.DocumentRepository.delete_collection",
-        return_value=None
-    )
+.venv/lib/python3.11/site-packages/pydantic/_internal/_config.py:295
+.venv/lib/python3.11/site-packages/pydantic/_internal/_config.py:295
+.venv/lib/python3.11/site-packages/pydantic/_internal/_config.py:295
+  /Users/epfn119476/Documents/HDFC/genai_platform_services/.venv/lib/python3.11/site-packages/pydantic/_internal/_config.py:295: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.10/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
 
-    resp = client.delete(
-        "/v1/api/delete_collection",
-        json=delete_collection_payload,
-        headers=valid_headers
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["message"] == "Collection has been deleted."
-    assert body["collection"] == "test-collection-uuid"
+<frozen importlib._bootstrap>:241
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
 
+<frozen importlib._bootstrap>:241
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Test #4: delete_collection when the table does not exist → 404
-def test_delete_collection_table_not_found(client, delete_collection_payload, valid_headers, mocker):
-    # fake session‐factory & pretend collection meta exists
-    fake_session = MagicMock()
-    fake_cm = MagicMock()
-    fake_cm.__enter__.return_value = fake_session
-    fake_cm.__exit__.return_value = None
-    mocker.patch(
-        "src.api.collection_router.create_session_platform",
-        return_value=fake_cm,
-    )
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
 
-    # the meta‐query finds the collection
-    fake_session.execute.return_value.scalar_one_or_none.return_value = MagicMock(uuid="test-collection-uuid")
-
-    # table‐exists returns False → 404
-    mocker.patch(
-        "src.repository.document_repository.DocumentRepository.check_table_exists",
-        return_value=False
-    )
-
-    resp = client.delete(
-        "/v1/api/delete_collection",
-        json=delete_collection_payload,
-        headers=valid_headers
-    )
-    assert resp.status_code == 404
-    assert "Collection table" in resp.json()["detail"]
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
