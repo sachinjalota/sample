@@ -1,49 +1,92 @@
-import httpx
-from fastapi import HTTPException, status, Depends
-from src.config import get_settings
+from fastapi import APIRouter, Depends, HTTPException, status
+from src.api.deps import (
+    validate_headers_and_api_key,
+    check_embedding_model,
+    validate_collection_access,
+)
 from src.db.db_manager import DBManager
-from src.db.platform_meta_tables import CollectionInfo
-from src.db.connection import create_session_platform  # only if you still need sessions elsewhere
+from src.repository.document_repository import DocumentRepository, create_document_model
+from src.models.collection_payload import CreateCollections, DeleteCollection
+from src.models.headers import HeaderInformation
+from src.logging_config import Logger
 
-settings = get_settings()
+router = APIRouter()
+logger = Logger.create_logger(__name__)
 
-async def validate_headers_and_api_key(...) -> HeaderInformation:
-    # your existing header validation logic
-    ...
+@router.post(
+    "/collections",
+    summary="Create one or more collections",
+    status_code=status.HTTP_200_OK,
+)
+async def create_collection(
+    request: CreateCollections,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+):
+    response = []
 
-async def check_embedding_model(model_name: str) -> int:
-    # Re-use the generic select_one to fetch the model row:
-    row = DBManager.select_one(
-        model=EmbeddingModels,
-        filters={"model_name": model_name},
-        raise_not_found=False
-    )
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Embedding model '{model_name}' not found."
+    for entry in request.collection_entries:
+        # 1) Validate & get embedding dims
+        dims = await check_embedding_model(entry.model)
+
+        # 2) Insert metadata row
+        pk = DBManager.insert_one(
+            model=CollectionInfo,
+            data={
+                "uuid": entry.generated_uuid := str(uuid4()),
+                "channel_id": entry.channel_id,
+                "usecase_id": entry.usecase_id,
+                "collection_name": entry.collection_name,
+                "model": entry.model,
+            }
         )
-    return int(row.dimensions)
+        # pk is a tuple; uuid is explicitly in payload so you can ignore pk
 
-async def validate_collection_access(api_key: str, collection_uuid: str) -> None:
-    # 1) Check with Prompt-Hub
-    validation_url = f"{settings.prompt_hub_endpoint}{settings.prompt_hub_get_usecase_by_apikey}"
-    verify = settings.deployment_env == "PROD"
-    async with httpx.AsyncClient(verify=verify) as client:
-        resp = await client.get(validation_url, headers={"lite-llm-api-key": api_key})
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
+        # 3) Create the actual document table & indexes
+        create_document_model(entry.generated_uuid, embedding_dimensions=dims)
 
-    data = resp.json()["data"]
-    channel_id = data["channel_id"]
-    team_id = data["team_id"]
+        logger.info(f"Created collection {entry.generated_uuid}")
+        response.append({
+            "collection_name": entry.collection_name,
+            "uuid": entry.generated_uuid,
+        })
 
-    # 2) Fetch the collection row
-    col = DBManager.select_one(
+    return {"collections": response}
+
+
+@router.delete(
+    "/collections/{collection_uid}",
+    summary="Delete a collection by UUID",
+    status_code=status.HTTP_200_OK,
+)
+async def delete_collection(
+    request: DeleteCollection,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+):
+    # 1) Ensure the client is allowed to delete this collection
+    await validate_collection_access(header_information.x_base_api_key, request.collection_uid)
+
+    # 2) Ensure the physical table exists, then drop it
+    repo = DocumentRepository(request.collection_uid, create_if_not_exists=False)
+    if not repo.check_table_exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Collection table '{request.collection_uid}' missing."
+        )
+    repo.delete_collection()
+
+    # 3) Delete the metadata row
+    deleted = DBManager.delete_many(
         model=CollectionInfo,
-        filters={"uuid": collection_uuid}
+        filters={"uuid": request.collection_uid}
     )
+    if deleted == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Collection '{request.collection_uid}' not found."
+        )
 
-    # 3) Verify ownership
-    if str(col.channel_id) != channel_id or str(col.usecase_id) != team_id:
-        raise HTTPException(status_code=403, detail="Not authorized for this collection.")
+    logger.info(f"Deleted collection {request.collection_uid}")
+    return {
+        "message": "Collection has been deleted.",
+        "collection": request.collection_uid
+    }
