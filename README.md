@@ -1,116 +1,49 @@
-from typing import Any, Dict, List, Optional, Sequence, Type, TypeVar, Union
-from fastapi import HTTPException, status
-from sqlalchemy import delete, insert, select, update
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import DeclarativeMeta
+import httpx
+from fastapi import HTTPException, status, Depends
+from src.config import get_settings
+from src.db.db_manager import DBManager
+from src.db.platform_meta_tables import CollectionInfo
+from src.db.connection import create_session_platform  # only if you still need sessions elsewhere
 
-from src.db.connection import create_session_platform
-from src.logging_config import Logger
+settings = get_settings()
 
-T = TypeVar("T", bound=DeclarativeMeta)
-logger = Logger.create_logger(__name__)
+async def validate_headers_and_api_key(...) -> HeaderInformation:
+    # your existing header validation logic
+    ...
 
-class DBManager:
-    """Generic CRUD operations for any SQLAlchemy model."""
+async def check_embedding_model(model_name: str) -> int:
+    # Re-use the generic select_one to fetch the model row:
+    row = DBManager.select_one(
+        model=EmbeddingModels,
+        filters={"model_name": model_name},
+        raise_not_found=False
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Embedding model '{model_name}' not found."
+        )
+    return int(row.dimensions)
 
-    @staticmethod
-    def _handle_error(exc: Exception, msg: str):
-        logger.exception(msg)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+async def validate_collection_access(api_key: str, collection_uuid: str) -> None:
+    # 1) Check with Prompt-Hub
+    validation_url = f"{settings.prompt_hub_endpoint}{settings.prompt_hub_get_usecase_by_apikey}"
+    verify = settings.deployment_env == "PROD"
+    async with httpx.AsyncClient(verify=verify) as client:
+        resp = await client.get(validation_url, headers={"lite-llm-api-key": api_key})
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
 
-    @staticmethod
-    def _build_filters(
-        model: Type[T],
-        filters: Optional[Union[Dict[str, Any], Sequence[Any]]] = None
-    ) -> Sequence[Any]:
-        if not filters:
-            return []
-        if isinstance(filters, dict):
-            return [getattr(model, k) == v for k, v in filters.items()]
-        return list(filters)  # assume SQLAlchemy expressions
+    data = resp.json()["data"]
+    channel_id = data["channel_id"]
+    team_id = data["team_id"]
 
-    @classmethod
-    def select_one(
-        cls,
-        model: Type[T],
-        filters: Optional[Union[Dict[str, Any], Sequence[Any]]] = None,
-        raise_not_found: bool = True
-    ) -> Optional[T]:
-        try:
-            with create_session_platform() as session:
-                stmt = select(model).where(*cls._build_filters(model, filters))
-                result = session.execute(stmt).scalar_one_or_none()
+    # 2) Fetch the collection row
+    col = DBManager.select_one(
+        model=CollectionInfo,
+        filters={"uuid": collection_uuid}
+    )
 
-            if result is None and raise_not_found:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"{model.__name__} not found for filters {filters}"
-                )
-            return result
-
-        except HTTPException:
-            raise
-        except Exception as exc:
-            cls._handle_error(exc, f"Error selecting one {model.__name__}")
-
-    @classmethod
-    def select_many(
-        cls,
-        model: Type[T],
-        filters: Optional[Union[Dict[str, Any], Sequence[Any]]] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None
-    ) -> List[T]:
-        try:
-            with create_session_platform() as session:
-                stmt = select(model).where(*cls._build_filters(model, filters))
-                if limit is not None:
-                    stmt = stmt.limit(limit)
-                if offset is not None:
-                    stmt = stmt.offset(offset)
-                return session.execute(stmt).scalars().all()
-
-        except Exception as exc:
-            cls._handle_error(exc, f"Error selecting many {model.__name__}")
-
-    @classmethod
-    def insert_one(cls, model: Type[T], data: Dict[str, Any]) -> Any:
-        try:
-            with create_session_platform() as session:
-                stmt = insert(model).values(**data)
-                result = session.execute(stmt)
-                session.commit()
-                return result.inserted_primary_key
-        except Exception as exc:
-            cls._handle_error(exc, f"Error inserting into {model.__name__}")
-
-    @classmethod
-    def update_many(
-        cls,
-        model: Type[T],
-        filters: Optional[Union[Dict[str, Any], Sequence[Any]]],
-        data: Dict[str, Any]
-    ) -> int:
-        try:
-            with create_session_platform() as session:
-                stmt = update(model).where(*cls._build_filters(model, filters)).values(**data)
-                result = session.execute(stmt)
-                session.commit()
-                return result.rowcount
-        except Exception as exc:
-            cls._handle_error(exc, f"Error updating {model.__name__}")
-
-    @classmethod
-    def delete_many(
-        cls,
-        model: Type[T],
-        filters: Optional[Union[Dict[str, Any], Sequence[Any]]]
-    ) -> int:
-        try:
-            with create_session_platform() as session:
-                stmt = delete(model).where(*cls._build_filters(model, filters))
-                result = session.execute(stmt)
-                session.commit()
-                return result.rowcount
-        except Exception as exc:
-            cls._handle_error(exc, f"Error deleting from {model.__name__}")
+    # 3) Verify ownership
+    if str(col.channel_id) != channel_id or str(col.usecase_id) != team_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this collection.")
