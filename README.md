@@ -1,158 +1,116 @@
+from typing import Any, Dict, List, Optional, Sequence, Type, TypeVar, Union
+from fastapi import HTTPException, status
+from sqlalchemy import delete, insert, select, update
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import DeclarativeMeta
 
-I have following files of a service from a project based on fastapi 
-
->> collection_router.py
-from uuid import uuid4
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select
-
-from src.api.deps import (
-    check_embedding_model,
-    validate_collection_access,
-    validate_headers_and_api_key,
-)
-from src.config import get_settings
 from src.db.connection import create_session_platform
-from src.db.platform_meta_tables import CollectionInfo
 from src.logging_config import Logger
-from src.models.collection_payload import CreateCollections, DeleteCollection
-from src.models.headers import HeaderInformation
-from src.repository.document_repository import DocumentRepository, create_document_model
 
-router = APIRouter()
+T = TypeVar("T", bound=DeclarativeMeta)
 logger = Logger.create_logger(__name__)
-settings = get_settings()
 
+class DBManager:
+    """Generic CRUD operations for any SQLAlchemy model."""
 
-@router.post(
-    settings.create_collection,
-    summary="Create a new collection in DB-B based on request.",
-    status_code=status.HTTP_200_OK,
-)
-async def create_collection(
-    request: CreateCollections,
-    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
-) -> dict:
-    try:
-        response = []
+    @staticmethod
+    def _handle_error(exc: Exception, msg: str):
+        logger.exception(msg)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
-        with create_session_platform() as session_platform:
-            for entry in request.collection_entries:
-                model_dim = await check_embedding_model(entry.model)
-                collection_uuid = str(uuid4())
+    @staticmethod
+    def _build_filters(
+        model: Type[T],
+        filters: Optional[Union[Dict[str, Any], Sequence[Any]]] = None
+    ) -> Sequence[Any]:
+        if not filters:
+            return []
+        if isinstance(filters, dict):
+            return [getattr(model, k) == v for k, v in filters.items()]
+        return list(filters)  # assume SQLAlchemy expressions
 
-                collection_info = CollectionInfo(
-                    uuid=collection_uuid,
-                    channel_id=entry.channel_id,
-                    usecase_id=entry.usecase_id,
-                    collection_name=entry.collection_name,
-                    model=entry.model,
-                )
-                session_platform.add(collection_info)
-                session_platform.commit()
+    @classmethod
+    def select_one(
+        cls,
+        model: Type[T],
+        filters: Optional[Union[Dict[str, Any], Sequence[Any]]] = None,
+        raise_not_found: bool = True
+    ) -> Optional[T]:
+        try:
+            with create_session_platform() as session:
+                stmt = select(model).where(*cls._build_filters(model, filters))
+                result = session.execute(stmt).scalar_one_or_none()
 
-                create_document_model(collection_uuid, embedding_dimensions=model_dim)
-                logger.info(f"Created collection {collection_uuid} with dimensions {model_dim}")
-
-                response.append({"collection_name": entry.collection_name, "uuid": collection_uuid})
-
-        return {"collections": response}
-
-    except HTTPException as e:
-        raise e
-
-    except Exception as e:
-        logger.exception("Error creating collection.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@router.delete(
-    settings.delete_collection,
-    summary="Delete a collection from DB-B and its metadata.",
-    status_code=status.HTTP_200_OK,
-)
-async def delete_collection(
-    request: DeleteCollection,
-    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
-) -> dict:
-    await validate_collection_access(header_information.x_base_api_key, request.collection_uid)
-    try:
-        with create_session_platform() as session_platform:
-            collection_query = session_platform.execute(
-                select(CollectionInfo).where(CollectionInfo.uuid == request.collection_uid)
-            ).scalar_one_or_none()
-
-            if not collection_query:
+            if result is None and raise_not_found:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Collection with UID '{request.collection_uid}' not found.",
+                    detail=f"{model.__name__} not found for filters {filters}"
                 )
+            return result
 
-            document_repository = DocumentRepository(request.collection_uid, create_if_not_exists=False)
-            if not document_repository.check_table_exists():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Collection table '{request.collection_uid}' does not exist in the database.",
-                )
-            document_repository.delete_collection()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            cls._handle_error(exc, f"Error selecting one {model.__name__}")
 
-            session_platform.execute(delete(CollectionInfo).where(CollectionInfo.uuid == request.collection_uid))
-            session_platform.commit()
+    @classmethod
+    def select_many(
+        cls,
+        model: Type[T],
+        filters: Optional[Union[Dict[str, Any], Sequence[Any]]] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> List[T]:
+        try:
+            with create_session_platform() as session:
+                stmt = select(model).where(*cls._build_filters(model, filters))
+                if limit is not None:
+                    stmt = stmt.limit(limit)
+                if offset is not None:
+                    stmt = stmt.offset(offset)
+                return session.execute(stmt).scalars().all()
 
-            logger.info(f"Deleted collection with UID '{request.collection_uid}'")
+        except Exception as exc:
+            cls._handle_error(exc, f"Error selecting many {model.__name__}")
 
-        return {"message": "Collection has been deleted.", "collection": request.collection_uid}
+    @classmethod
+    def insert_one(cls, model: Type[T], data: Dict[str, Any]) -> Any:
+        try:
+            with create_session_platform() as session:
+                stmt = insert(model).values(**data)
+                result = session.execute(stmt)
+                session.commit()
+                return result.inserted_primary_key
+        except Exception as exc:
+            cls._handle_error(exc, f"Error inserting into {model.__name__}")
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Error deleting collection.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    @classmethod
+    def update_many(
+        cls,
+        model: Type[T],
+        filters: Optional[Union[Dict[str, Any], Sequence[Any]]],
+        data: Dict[str, Any]
+    ) -> int:
+        try:
+            with create_session_platform() as session:
+                stmt = update(model).where(*cls._build_filters(model, filters)).values(**data)
+                result = session.execute(stmt)
+                session.commit()
+                return result.rowcount
+        except Exception as exc:
+            cls._handle_error(exc, f"Error updating {model.__name__}")
 
->> deps.py
-async def check_embedding_model(embedd_model: str) -> int:
-    with create_session_platform() as sess_plat:
-        model_query = sess_plat.execute(
-            select(EmbeddingModels).where(EmbeddingModels.model_name == embedd_model)
-        ).scalar_one_or_none()
-        if not model_query:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Model '{embedd_model}' not found in embedding_models table.",
-            )
-        return int(model_query.dimensions)
-
-
-async def validate_collection_access(base_api_key: str, collection_name: str) -> None:
-    validation_url = f"{settings.prompt_hub_endpoint}{settings.prompt_hub_get_usecase_by_apikey}"
-    verify = False if settings.deployment_env != "PROD" else True
-    async with httpx.AsyncClient(verify=verify) as client:
-        response = await client.get(
-            validation_url,
-            headers={"lite-llm-api-key": base_api_key},
-        )
-        if response.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
-
-        channel_id = response.json()["data"]["channel_id"]
-        team_id = response.json()["data"]["team_id"]
-
-    with create_session_platform() as sess_plat:
-        collection_query = sess_plat.execute(
-            select(CollectionInfo).where(CollectionInfo.uuid == collection_name)
-        ).scalar_one_or_none()
-        if not collection_query:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Collection '{collection_name}' not found.",
-            )
-        elif str(collection_query.usecase_id) != team_id or str(collection_query.channel_id) != channel_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User is not authorized to access this collection.",
-            )
-
-
-
-Can we create a class like DB Manager that handles all the db related code statements and keep the router and deps files clean?
+    @classmethod
+    def delete_many(
+        cls,
+        model: Type[T],
+        filters: Optional[Union[Dict[str, Any], Sequence[Any]]]
+    ) -> int:
+        try:
+            with create_session_platform() as session:
+                stmt = delete(model).where(*cls._build_filters(model, filters))
+                result = session.execute(stmt)
+                session.commit()
+                return result.rowcount
+        except Exception as exc:
+            cls._handle_error(exc, f"Error deleting from {model.__name__}")
