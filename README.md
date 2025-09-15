@@ -7115,4 +7115,4 @@ Now understand carefully how i want you to answer
 - First list all the tasks, sub-task that can mentioned as description in jira task, not too brief and not too much in detail.
 - Second take the requirement one at a time and list all the files that need changes or needed to created and then give the updated code of each file with highlisthed updated segment, new file codes with locations and brief description supporting the changes
 
-Bes as detailed as possible when updating code
+Be as detailed as possible when updating code. I want complete code so think properly
