@@ -6659,13 +6659,19 @@ def detect_document_type(url: str) -> str:
 
 
 Go through the abouve code very very thoroughly and analyse it like a pro developer. I have few requirements for you, listed below
-1. Make the Vector Index related apis openai compatible i.e. create collection, search, retreive, delete, index, rag, all related to vector store/index related, including one mentioned under /src/api/routers/v2.
-2. API's under /src/api/routers/v2 would be slightly different than added outside of v2, so I need best possible integration with standardised schema of vector store
-3. I also am expected to integrate ElasticSearch for search and retrive API's 
+1. Make the Vector Index related APIs compatible with openai api reference i.e.
+     v1/api/collection, vi/api/collection/data, vi/api/collection/create, vi/api/collection/delete, vi/api/index, vi/api/search, vi/api/delete_index, vi/api/collection/delete_by_ids, vi/api/rag - all related to vector store/index related.
+2. API's under /src/api/routers/v2 would be slightly different than the mentioned in above point. so additionally create a uniformed apis that are the best possible integration with standardised schema of vector store
+3. I also am expected to integrate ElasticSearch for search and retrive API's
+
+Note: 
+1. Keep the best standards fir coding and ones that has been implemented
+2. Try if we can create an sdk for OpenAI vectoe stores, something similar to /src/integrations/open_ai_sdk.py
 
 I am also attaching OpenAI Vector Store doc api reference below for your better understanding 
 
 ------OpenAI Vector Store API Doc Reference------
+URL - https://platform.openai.com/docs/api-reference/vector-stores
 
 Vector stores
 Vector stores power semantic search for the Retrieval API and the file_search tool in the Responses and Assistants APIs.
@@ -7105,8 +7111,8 @@ The total number of bytes used by the files in the vector store.
 
 -------------------------------------------------
 
-
-
 Now understand carefully how i want you to answer
-First list all the tasks, sub-task as per jira ticket, not too brief and not too much in detail.
-Second take the requirement one at a time and list all the files that need changes or needed to created and then give the updated code of each file with highlisthed updated segment, new file codes with locations and brief description supporting the changes
+- First list all the tasks, sub-task that can mentioned as description in jira task, not too brief and not too much in detail.
+- Second take the requirement one at a time and list all the files that need changes or needed to created and then give the updated code of each file with highlisthed updated segment, new file codes with locations and brief description supporting the changes
+
+Bes as detailed as possible when updating code
