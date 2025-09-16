@@ -1,5 +1,5 @@
 
-Complete Project Structure:
+## Complete Project Structure:
 genai_platform_services/
     Dockerfile
     init.sh
@@ -6657,22 +6657,343 @@ def detect_document_type(url: str) -> str:
     else:
         raise HTTPException(status_code=404, detail="Document type not supported. Please upload only pdf/jpeg/jpg/png")
 
+## Sample Curls and responses
 
-Go through the abouve code very very thoroughly and analyse it like a pro developer. I have few requirements for you, listed below
-1. Make the Vector Index related APIs compatible with openai api reference i.e.
+1. curl --location --request POST 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/collection/create' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk-YNnsp7p5LQbQu7tfRgLSHg' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "collection": "Sachin_Test",
+    "model_name": "BAAI/bge-m3"
+}'
+Response - {
+    "collection": "Sachin_Test",
+    "message": "Created collection successfully"
+}
+
+2. curl --location --request GET 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/collection' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk-YNnsp7p5LQbQu7tfRgLSHg'
+Response - {
+    "collections": [
+        "Test2",
+        "Sachin_Test"
+    ]
+}
+
+3. curl --location --request POST 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/index' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk-YNnsp7p5LQbQu7tfRgLSHg' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "storage_backend": "pgvector",
+    "collection": "Sachin_Test",
+    "documents": [
+        {
+            "content": "Artificial Intelligence is transforming industries like finance, healthcare, and retail.",
+            "links": [
+                "https://example.com/ai"
+            ],
+            "topics": [
+                "AI"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "1",
+                "Title": "Introduction to AI"
+            }
+        },
+        {
+            "content": "Rising temperatures and sea levels are key effects of climate change.",
+            "links": [
+                "https://example.com/climate"
+            ],
+            "topics": [
+                "Climate"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "2",
+                "Title": "Climate Change Effects"
+            }
+        }
+    ]
+}'
+Response - {
+    "message": "Data indexed successfully ."
+}
+
+4. curl --location --request GET 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/collection/data?collection=btg_search_test&offset=0&limit=10' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk--ViXX0_2ZWJXwdY30bXHlg'
+Response - {
+    "total": 10,
+    "details": [
+        {
+            "id": "9185bf58-24a4-4f9b-84a8-62ef2d9d6a8b",
+            "content": "Artificial Intelligence is transforming industries like finance, healthcare, and retail.",
+            "links": [
+                "https://example.com/ai"
+            ],
+            "created_at": "2025-06-19T14:12:17.988394",
+            "topics": [
+                "AI"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "1",
+                "Title": "Introduction to AI"
+            }
+        },
+        {
+            "id": "b2705fc0-7f8f-461e-83b9-586e0bc5b1bc",
+            "content": "Rising temperatures and sea levels are key effects of climate change.",
+            "links": [
+                "https://example.com/climate"
+            ],
+            "created_at": "2025-06-19T14:12:18.146381",
+            "topics": [
+                "Climate"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "2",
+                "Title": "Climate Change Effects"
+            }
+        },
+        {
+            "id": "2db7c2ab-34ff-49d4-8330-04efd35e1edd",
+            "content": "Mutual funds are a great way to diversify your investment portfolio.",
+            "links": [
+                "https://example.com/investing"
+            ],
+            "created_at": "2025-06-19T14:12:18.164813",
+            "topics": [
+                "Finance"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "3",
+                "Title": "Investing in Mutual Funds"
+            }
+        },
+        {
+            "id": "61c49892-0dd1-4c27-8b68-f68e580a7c57",
+            "content": "Python is a widely used programming language for data science and web development.",
+            "links": [
+                "https://example.com/python"
+            ],
+            "created_at": "2025-06-19T14:12:18.172985",
+            "topics": [
+                "Programming"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "4",
+                "Title": "Python Programming Basics"
+            }
+        },
+        {
+            "id": "797b352a-9818-4bdf-92e7-fdb740bce34b",
+            "content": "Machine Learning is a subset of AI focused on algorithms that learn from data.",
+            "links": [
+                "https://example.com/ml"
+            ],
+            "created_at": "2025-06-19T14:12:18.188573",
+            "topics": [
+                "ML"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "5",
+                "Title": "Machine Learning for Beginners"
+            }
+        },
+        {
+            "id": "326ae02a-4a03-4984-8deb-7900ad985128",
+            "content": "Quantum computing leverages quantum bits to solve problems beyond classical capabilities.",
+            "links": [
+                "https://example.com/quantum-computing"
+            ],
+            "created_at": "2025-06-19T14:12:18.199172",
+            "topics": [
+                "Quantum Computing"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "6",
+                "Title": "Overview of Quantum Computing"
+            }
+        },
+        {
+            "id": "376ff54f-b6e0-4fed-8d47-3b2159947732",
+            "content": "With edge computing, data is processed locally on devices or near the source.",
+            "links": [
+                "https://example.com/edge-computing"
+            ],
+            "created_at": "2025-06-19T14:12:18.208905",
+            "topics": [
+                "Edge Computing"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "7",
+                "Title": "Overview of Edge Computing"
+            }
+        },
+        {
+            "id": "8ad8d06a-0656-4971-8e9b-31db6d2e272a",
+            "content": "NLP powers applications like chatbots, sentiment analysis, and language translation.",
+            "links": [
+                "https://example.com/natural-language-processing"
+            ],
+            "created_at": "2025-06-19T14:12:18.220095",
+            "topics": [
+                "Natural Language Processing"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "8",
+                "Title": "Overview of Natural Language Processing"
+            }
+        },
+        {
+            "id": "f5077d00-7881-4de0-9ce4-7f0ca9f71412",
+            "content": "Digital transformation involves adopting new technologies for better business outcomes.",
+            "links": [
+                "https://example.com/digital-transformation"
+            ],
+            "created_at": "2025-06-19T14:12:18.228962",
+            "topics": [
+                "Digital Transformation"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "9",
+                "Title": "Overview of Digital Transformation"
+            }
+        },
+        {
+            "id": "922fa350-d267-45e7-b7c0-ebf9aed1514f",
+            "content": "Mobile commerce and AI-powered recommendations are boosting e-commerce.",
+            "links": [
+                "https://example.com/e-commerce-growth"
+            ],
+            "created_at": "2025-06-19T14:12:18.236727",
+            "topics": [
+                "E-commerce Growth"
+            ],
+            "author": "Joshua",
+            "meta_data": {
+                "S.No": "10",
+                "Title": "Overview of E-commerce Growth"
+            }
+        }
+    ]
+}
+
+5. curl --location --request POST 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/search' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk-YNnsp7p5LQbQu7tfRgLSHg' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "collection": "Sachin_Test",
+    "search_type": "semantic",
+    "storage_backend": "pgvector",
+    "search_text": "Artificial Intelligence",
+    "content_filter": ["healthcare"],
+    "link_filter": [],
+    "topic_filter": [],
+    "limit": 5,
+    "min_score": 0.2,
+    "use_ranking": true
+}'
+Response - {
+    "results": [
+        {
+            "id": "578212af-5e44-44f9-9166-36a07dfdcd89",
+            "score": 0.613,
+            "source": {
+                "id": "578212af-5e44-44f9-9166-36a07dfdcd89",
+                "content": "Artificial Intelligence is transforming industries like finance, healthcare, and retail.",
+                "links": [
+                    "https://example.com/ai"
+                ],
+                "created_at": "2025-09-16T16:21:31.623494",
+                "topics": [
+                    "AI"
+                ],
+                "author": "Joshua",
+                "meta_data": {}
+            }
+        }
+    ],
+    "total": 1,
+    "query_time_ms": 109.16
+}
+
+6. curl --location --request DELETE 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/collection/delete_by_ids' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk-YNnsp7p5LQbQu7tfRgLSHg' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "storage_backend": "pgvector",
+    "collection": "Sachin_Test",
+    "index_ids": [
+        "1f0cfb21-5d45-42bc-aca2-8b8a5d9079c2",
+        "aec1ff13-35c7-4f4a-a483-371126afb2c5"
+    ]
+}'
+Response - {
+    "message": "No records were deleted from collection.",
+    "collection": "Sachin_Test"
+}
+
+7. curl --location --request DELETE 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/delete_index' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk-YNnsp7p5LQbQu7tfRgLSHg' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "storage_backend": "pgvector",
+    "collection": "Sachin_Test"
+}'
+Response - {
+    "message": "Successfully deleted 2 records from the collection.",
+    "collection": "Sachin_Test"
+}
+
+8. curl --location --request DELETE 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/collection/delete' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk-YNnsp7p5LQbQu7tfRgLSHg' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "collection": "Sachin_Test"
+}'
+Response - curl --location --request DELETE 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/collection/delete' \
+--header 'x-session-id: 1234' \
+--header 'x-base-api-key: sk-YNnsp7p5LQbQu7tfRgLSHg' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "collection": "Sachin_Test"
+}'
+
+
+Now Go through the above code repo and curl examples of few api routers very thoroughly and analyse it like a pro software developer. I have few requirements for you, listed below
+1. Make the Vector Index related APIs compatible with OpenAI Vector Store API attached below with url and content for your reference i.e. all the payload should follow openai api schema refernce.
      v1/api/collection, vi/api/collection/data, vi/api/collection/create, vi/api/collection/delete, vi/api/index, vi/api/search, vi/api/delete_index, vi/api/collection/delete_by_ids, vi/api/rag - all related to vector store/index related.
-2. API's under /src/api/routers/v2 would be slightly different than the mentioned in above point. so additionally create a uniformed apis that are the best possible integration with standardised schema of vector store
-3. I also am expected to integrate ElasticSearch for search and retrive API's
+   The 'OpenAI Vector Store API Doc Reference' below refers to Vector Store and Vectore Store Files which have their defined examples. In prder to perfeom above task very carefuly and responsibly, use your analytics to best match existing vector create/index/search related of my project with the API Doc Reference and provide a table for my understanding to know which of my existing API is mapped with which of OpenAI Vector Store/Files api schema
+   Note:
+   - Keep the best standards for coding
+   - Try if we can create an sdk for OpenAI vector stores or vector store files, something similar to /src/integrations/open_ai_sdk.py
+2. I also am expected to integrate ElasticSearch for all these operations (create, list, delete, index, search....) so additionaly provide all code pertaining to ElasticSearch vector db as well
 
-Note: 
-1. Keep the best standards fir coding and ones that has been implemented
-2. Try if we can create an sdk for OpenAI vectoe stores, something similar to /src/integrations/open_ai_sdk.py
-
-I am also attaching OpenAI Vector Store doc api reference below for your better understanding 
+I am attaching OpenAI Vector Stores and Vector Store Files doc api reference below for your better understanding 
 
 ------OpenAI Vector Store API Doc Reference------
 URL - https://platform.openai.com/docs/api-reference/vector-stores
 
+Content:
 Vector stores
 Vector stores power semantic search for the Retrieval API and the file_search tool in the Responses and Assistants APIs.
 
@@ -6692,7 +7013,51 @@ Optional
 The chunking strategy used to chunk the file(s). If not set, will use the auto strategy. Only applicable if file_ids is non-empty.
 
 
-Show possible types
+Hide possible types
+Auto Chunking Strategy
+object
+The default strategy. This strategy currently uses a max_chunk_size_tokens of 800 and chunk_overlap_tokens of 400.
+
+
+Hide properties
+type
+string
+
+Required
+Always auto.
+
+Static Chunking Strategy
+object
+Customize your own chunking strategy by setting chunk size and chunk overlap.
+
+
+Hide properties
+static
+object
+
+Required
+
+Hide properties
+chunk_overlap_tokens
+integer
+
+Required
+The number of tokens that overlap between chunks. The default value is 400.
+
+Note that the overlap must not exceed half of max_chunk_size_tokens.
+
+max_chunk_size_tokens
+integer
+
+Required
+The maximum number of tokens in each chunk. The default value is 800. The minimum value is 100 and the maximum value is 4096.
+
+type
+string
+
+Required
+Always static.
+
 expires_after
 object
 
@@ -6700,7 +7065,19 @@ Optional
 The expiration policy for a vector store.
 
 
-Show properties
+Hide properties
+anchor
+string
+
+Required
+Anchor timestamp after which the expiration policy applies. Supported anchors: last_active_at.
+
+days
+integer
+
+Required
+The number of days after the anchor time that the vector store will expire.
+
 file_ids
 array
 
@@ -6877,7 +7254,19 @@ Optional
 The expiration policy for a vector store.
 
 
-Show properties
+Hide properties
+anchor
+string
+
+Required
+Anchor timestamp after which the expiration policy applies. Supported anchors: last_active_at.
+
+days
+integer
+
+Required
+The number of days after the anchor time that the vector store will expire.
+
 metadata
 map
 
@@ -6976,7 +7365,87 @@ Optional
 A filter to apply based on file attributes.
 
 
-Show possible types
+Hide possible types
+Comparison Filter
+object
+A filter used to compare a specified attribute key to a given value using a defined comparison operation.
+
+
+Hide properties
+key
+string
+
+Required
+The key to compare against the value.
+
+type
+string
+
+Required
+Specifies the comparison operator: eq, ne, gt, gte, lt, lte.
+
+eq: equals
+ne: not equal
+gt: greater than
+gte: greater than or equal
+lt: less than
+lte: less than or equal
+value
+string / number / boolean
+
+Required
+The value to compare against the attribute key; supports string, number, or boolean types.
+
+Compound Filter
+object
+Combine multiple filters using and or or.
+
+
+Hide properties
+filters
+array
+
+Required
+Array of filters to combine. Items can be ComparisonFilter or CompoundFilter.
+
+
+Hide possible types
+Comparison Filter
+object
+A filter used to compare a specified attribute key to a given value using a defined comparison operation.
+
+
+Hide properties
+key
+string
+
+Required
+The key to compare against the value.
+
+type
+string
+
+Required
+Specifies the comparison operator: eq, ne, gt, gte, lt, lte.
+
+eq: equals
+ne: not equal
+gt: greater than
+gte: greater than or equal
+lt: less than
+lte: less than or equal
+value
+string / number / boolean
+
+Required
+The value to compare against the attribute key; supports string, number, or boolean types.
+
+type
+string
+
+Required
+Type of operation: and or or.
+
 max_num_results
 integer
 
@@ -6991,7 +7460,19 @@ Optional
 Ranking options for search.
 
 
-Show properties
+Hide properties
+ranker
+string
+
+Optional
+Defaults to auto
+Enable re-ranking; set to none to disable, which can help reduce latency.
+
+score_threshold
+number
+
+Optional
+Defaults to 0
 rewrite_query
 boolean
 
@@ -7061,9 +7542,19 @@ object
 The expiration policy for a vector store.
 
 
-Show properties
+Hide properties
+anchor
+string
+
+Anchor timestamp after which the expiration policy applies. Supported anchors: last_active_at.
+
+days
+integer
+
+The number of days after the anchor time that the vector store will expire.
+
 expires_at
-integer or null
+integer
 
 The Unix timestamp (in seconds) for when the vector store will expire.
 
@@ -7071,14 +7562,39 @@ file_counts
 object
 
 
-Show properties
+Hide properties
+cancelled
+integer
+
+The number of files that were cancelled.
+
+completed
+integer
+
+The number of files that have been successfully processed.
+
+failed
+integer
+
+The number of files that have failed to process.
+
+in_progress
+integer
+
+The number of files that are currently being processed.
+
+total
+integer
+
+The total number of files.
+
 id
 string
 
 The identifier, which can be referenced in API endpoints.
 
 last_active_at
-integer or null
+integer
 
 The Unix timestamp (in seconds) for when the vector store was last active.
 
@@ -7109,10 +7625,488 @@ integer
 
 The total number of bytes used by the files in the vector store.
 
+OBJECT The vector store object
+{
+  "id": "vs_123",
+  "object": "vector_store",
+  "created_at": 1698107661,
+  "usage_bytes": 123456,
+  "last_active_at": 1698107661,
+  "name": "my_vector_store",
+  "status": "completed",
+  "file_counts": {
+    "in_progress": 0,
+    "completed": 100,
+    "cancelled": 0,
+    "failed": 0,
+    "total": 100
+  },
+  "last_used_at": 1698107661
+}
+Vector store files
+Vector store files represent files inside a vector store.
+
+Related guide: File Search
+
+Create vector store file
+post
+ 
+https://api.openai.com/v1/vector_stores/{vector_store_id}/files
+Create a vector store file by attaching a File to a vector store.
+
+Path parameters
+vector_store_id
+string
+
+Required
+The ID of the vector store for which to create a File.
+
+Request body
+file_id
+string
+
+Required
+A File ID that the vector store should use. Useful for tools like file_search that can access files.
+
+attributes
+map
+
+Optional
+Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard. Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters, booleans, or numbers.
+
+chunking_strategy
+object
+
+Optional
+The chunking strategy used to chunk the file(s). If not set, will use the auto strategy.
+
+
+Hide possible types
+Auto Chunking Strategy
+object
+The default strategy. This strategy currently uses a max_chunk_size_tokens of 800 and chunk_overlap_tokens of 400.
+
+
+Hide properties
+type
+string
+
+Required
+Always auto.
+
+Static Chunking Strategy
+object
+Customize your own chunking strategy by setting chunk size and chunk overlap.
+
+
+Hide properties
+static
+object
+
+Required
+
+Hide properties
+chunk_overlap_tokens
+integer
+
+Required
+The number of tokens that overlap between chunks. The default value is 400.
+
+Note that the overlap must not exceed half of max_chunk_size_tokens.
+
+max_chunk_size_tokens
+integer
+
+Required
+The maximum number of tokens in each chunk. The default value is 800. The minimum value is 100 and the maximum value is 4096.
+
+type
+string
+
+Required
+Always static.
+
+Returns
+A vector store file object.
+
+Example request
+from openai import OpenAI
+client = OpenAI()
+
+vector_store_file = client.vector_stores.files.create(
+  vector_store_id="vs_abc123",
+  file_id="file-abc123"
+)
+print(vector_store_file)
+Response
+{
+  "id": "file-abc123",
+  "object": "vector_store.file",
+  "created_at": 1699061776,
+  "usage_bytes": 1234,
+  "vector_store_id": "vs_abcd",
+  "status": "completed",
+  "last_error": null
+}
+List vector store files
+get
+ 
+https://api.openai.com/v1/vector_stores/{vector_store_id}/files
+Returns a list of vector store files.
+
+Path parameters
+vector_store_id
+string
+
+Required
+The ID of the vector store that the files belong to.
+
+Query parameters
+after
+string
+
+Optional
+A cursor for use in pagination. after is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+
+before
+string
+
+Optional
+A cursor for use in pagination. before is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+
+filter
+string
+
+Optional
+Filter by file status. One of in_progress, completed, failed, cancelled.
+
+limit
+integer
+
+Optional
+Defaults to 20
+A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+
+order
+string
+
+Optional
+Defaults to desc
+Sort order by the created_at timestamp of the objects. asc for ascending order and desc for descending order.
+
+Returns
+A list of vector store file objects.
+
+Example request
+from openai import OpenAI
+client = OpenAI()
+
+vector_store_files = client.vector_stores.files.list(
+  vector_store_id="vs_abc123"
+)
+print(vector_store_files)
+Response
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "file-abc123",
+      "object": "vector_store.file",
+      "created_at": 1699061776,
+      "vector_store_id": "vs_abc123"
+    },
+    {
+      "id": "file-abc456",
+      "object": "vector_store.file",
+      "created_at": 1699061776,
+      "vector_store_id": "vs_abc123"
+    }
+  ],
+  "first_id": "file-abc123",
+  "last_id": "file-abc456",
+  "has_more": false
+}
+Retrieve vector store file
+get
+ 
+https://api.openai.com/v1/vector_stores/{vector_store_id}/files/{file_id}
+Retrieves a vector store file.
+
+Path parameters
+file_id
+string
+
+Required
+The ID of the file being retrieved.
+
+vector_store_id
+string
+
+Required
+The ID of the vector store that the file belongs to.
+
+Returns
+The vector store file object.
+
+Example request
+from openai import OpenAI
+client = OpenAI()
+
+vector_store_file = client.vector_stores.files.retrieve(
+  vector_store_id="vs_abc123",
+  file_id="file-abc123"
+)
+print(vector_store_file)
+Response
+{
+  "id": "file-abc123",
+  "object": "vector_store.file",
+  "created_at": 1699061776,
+  "vector_store_id": "vs_abcd",
+  "status": "completed",
+  "last_error": null
+}
+Retrieve vector store file content
+get
+ 
+https://api.openai.com/v1/vector_stores/{vector_store_id}/files/{file_id}/content
+Retrieve the parsed contents of a vector store file.
+
+Path parameters
+file_id
+string
+
+Required
+The ID of the file within the vector store.
+
+vector_store_id
+string
+
+Required
+The ID of the vector store.
+
+Returns
+The parsed contents of the specified vector store file.
+
+Example request
+curl \
+https://api.openai.com/v1/vector_stores/vs_abc123/files/file-abc123/content \
+-H "Authorization: Bearer $OPENAI_API_KEY"
+Response
+{
+  "file_id": "file-abc123",
+  "filename": "example.txt",
+  "attributes": {"key": "value"},
+  "content": [
+    {"type": "text", "text": "..."},
+    ...
+  ]
+}
+Update vector store file attributes
+post
+ 
+https://api.openai.com/v1/vector_stores/{vector_store_id}/files/{file_id}
+Update attributes on a vector store file.
+
+Path parameters
+file_id
+string
+
+Required
+The ID of the file to update attributes.
+
+vector_store_id
+string
+
+Required
+The ID of the vector store the file belongs to.
+
+Request body
+attributes
+map
+
+Required
+Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard. Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters, booleans, or numbers.
+
+Returns
+The updated vector store file object.
+
+Example request
+curl https://api.openai.com/v1/vector_stores/{vector_store_id}/files/{file_id} \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"attributes": {"key1": "value1", "key2": 2}}'
+Response
+{
+  "id": "file-abc123",
+  "object": "vector_store.file",
+  "usage_bytes": 1234,
+  "created_at": 1699061776,
+  "vector_store_id": "vs_abcd",
+  "status": "completed",
+  "last_error": null,
+  "chunking_strategy": {...},
+  "attributes": {"key1": "value1", "key2": 2}
+}
+Delete vector store file
+delete
+ 
+https://api.openai.com/v1/vector_stores/{vector_store_id}/files/{file_id}
+Delete a vector store file. This will remove the file from the vector store but the file itself will not be deleted. To delete the file, use the delete file endpoint.
+
+Path parameters
+file_id
+string
+
+Required
+The ID of the file to delete.
+
+vector_store_id
+string
+
+Required
+The ID of the vector store that the file belongs to.
+
+Returns
+Deletion status
+
+Example request
+from openai import OpenAI
+client = OpenAI()
+
+deleted_vector_store_file = client.vector_stores.files.delete(
+    vector_store_id="vs_abc123",
+    file_id="file-abc123"
+)
+print(deleted_vector_store_file)
+Response
+{
+  id: "file-abc123",
+  object: "vector_store.file.deleted",
+  deleted: true
+}
+The vector store file object
+Beta
+A list of files attached to a vector store.
+
+attributes
+map
+
+Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard. Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters, booleans, or numbers.
+
+chunking_strategy
+object
+
+The strategy used to chunk the file.
+
+
+Hide possible types
+Static Chunking Strategy
+object
+
+Hide properties
+static
+object
+
+
+Hide properties
+chunk_overlap_tokens
+integer
+
+The number of tokens that overlap between chunks. The default value is 400.
+
+Note that the overlap must not exceed half of max_chunk_size_tokens.
+
+max_chunk_size_tokens
+integer
+
+The maximum number of tokens in each chunk. The default value is 800. The minimum value is 100 and the maximum value is 4096.
+
+type
+string
+
+Always static.
+
+Other Chunking Strategy
+object
+This is returned when the chunking strategy is unknown. Typically, this is because the file was indexed before the chunking_strategy concept was introduced in the API.
+
+
+Hide properties
+type
+string
+
+Always other.
+
+created_at
+integer
+
+The Unix timestamp (in seconds) for when the vector store file was created.
+
+id
+string
+
+The identifier, which can be referenced in API endpoints.
+
+last_error
+object
+
+The last error associated with this vector store file. Will be null if there are no errors.
+
+
+Hide properties
+code
+string
+
+One of server_error or rate_limit_exceeded.
+
+message
+string
+
+A human-readable description of the error.
+
+object
+string
+
+The object type, which is always vector_store.file.
+
+status
+string
+
+The status of the vector store file, which can be either in_progress, completed, cancelled, or failed. The status completed indicates that the vector store file is ready for use.
+
+usage_bytes
+integer
+
+The total vector store usage in bytes. Note that this may be different from the original file size.
+
+vector_store_id
+string
+
+The ID of the vector store that the File is attached to.
+
+OBJECT The vector store file object
+{
+  "id": "file-abc123",
+  "object": "vector_store.file",
+  "usage_bytes": 1234,
+  "created_at": 1698107661,
+  "vector_store_id": "vs_abc123",
+  "status": "completed",
+  "last_error": null,
+  "chunking_strategy": {
+    "type": "static",
+    "static": {
+      "max_chunk_size_tokens": 800,
+      "chunk_overlap_tokens": 400
+    }
+  }
+}
+
 -------------------------------------------------
 
 Now understand carefully how i want you to answer
 - First list all the tasks, sub-task that can mentioned as description in jira task, not too brief and not too much in detail.
-- Second take the requirement one at a time and list all the files that need changes or needed to created and then give the updated code of each file with highlisthed updated segment, new file codes with locations and brief description supporting the changes
+- Second take the requirement one at a time and list all the files that need changes or needed to created and then give the updated code of each file with updated segment highligthed, new file codes with locations and description describing why it was done.
 
-Be as detailed as possible when updating code. I want complete code so think properly
+Be as detailed as possible with your response. I want the complete code so think properly and carefully analysing each and every aspect mentioned. Architect the solution properly
