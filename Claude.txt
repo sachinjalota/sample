@@ -1,0 +1,1354 @@
+Looking at this comprehensive GenAI platform service codebase, I can see you're working with a vector storage system that needs to be aligned with OpenAI's Vector Store API specification while also adding ElasticSearch support. Let me break down the analysis and provide a thorough solution.
+
+## Endpoint Mapping Analysis
+
+First, let me map your existing endpoints to their OpenAI Vector Store API equivalents:
+
+| Current Project Endpoint | OpenAI Vector Store API | Purpose |
+|-------------------------|------------------------|---------|
+| `POST /v1/api/collection/create` | `POST /v1/vector_stores` | Create vector store |
+| `GET /v1/api/collection` | `GET /v1/vector_stores` | List vector stores |
+| `GET /v1/api/collection/data` | `GET /v1/vector_stores/{id}/files` | List vector store files/documents |
+| `DELETE /v1/api/collection/delete` | `DELETE /v1/vector_stores/{id}` | Delete vector store |
+| `POST /v1/api/index` | `POST /v1/vector_stores/{id}/files` | Add files to vector store |
+| `POST /v1/api/search` | `POST /v1/vector_stores/{id}/search` | Search vector store |
+| `DELETE /v1/api/delete_index` | Bulk file deletion (custom) | Delete all files |
+| `DELETE /v1/api/collection/delete_by_ids` | `DELETE /v1/vector_stores/{id}/files/{file_id}` | Delete specific files |
+| `POST /v1/api/rag` | Custom RAG endpoint | RAG functionality (not in OpenAI) |
+
+## JIRA Tasks
+
+### Epic: OpenAI Vector Store API Compatibility and ElasticSearch Integration
+
+#### Task 1: Core API Schema Transformation
+- Create OpenAI-compatible request/response models for vector store operations
+- Implement model mapping between existing schemas and OpenAI schemas
+- Add validation for OpenAI-specific fields (chunking_strategy, expires_after, etc.)
+
+#### Task 2: Vector Store SDK Development
+- Create VectorStoreSDK class similar to OpenAI SDK pattern
+- Implement async methods for all vector store operations
+- Add proper error handling and response transformation
+
+#### Task 3: API Router Refactoring
+- Refactor collection_router.py to support OpenAI-compatible endpoints
+- Update document_store_router.py for file operations compatibility
+- Maintain backward compatibility with existing endpoints
+
+#### Task 4: ElasticSearch Integration - Core Implementation
+- Create ElasticSearch database adapter implementing Database interface
+- Implement vector search capabilities using ElasticSearch dense_vector field
+- Add connection pooling and error handling for ElasticSearch
+
+#### Task 5: ElasticSearch Integration - Service Layer
+- Create ElasticSearchDocumentStore service implementing AbstractDocumentStore
+- Implement index, search, and delete operations for ElasticSearch
+- Add support for hybrid search (keyword + vector) in ElasticSearch
+
+#### Task 6: Storage Backend Registry Updates
+- Register ElasticSearch in storage backend registry
+- Update StorageBackend enum to include ELASTICSEARCH option
+- Ensure dynamic backend selection works seamlessly
+
+#### Task 7: Testing and Documentation
+- Create unit tests for new OpenAI-compatible endpoints
+- Test ElasticSearch integration with various document types
+- Update API documentation with OpenAI-compatible examples
+
+## Implementation
+
+### 1. New OpenAI-Compatible Models
+
+**File: `src/models/openai_vector_store.py`** (NEW)
+
+```python
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Union
+from uuid import UUID
+
+from pydantic import BaseModel, Field, field_validator
+
+
+# OpenAI Vector Store Models - These models match OpenAI's API specification
+
+class ChunkingStrategyType(str, Enum):
+    AUTO = "auto"
+    STATIC = "static"
+
+
+class AutoChunkingStrategy(BaseModel):
+    type: ChunkingStrategyType = Field(ChunkingStrategyType.AUTO, const=True)
+
+
+class StaticChunkingConfig(BaseModel):
+    max_chunk_size_tokens: int = Field(
+        800, 
+        ge=100, 
+        le=4096,
+        description="Maximum number of tokens in each chunk"
+    )
+    chunk_overlap_tokens: int = Field(
+        400,
+        description="Number of tokens that overlap between chunks"
+    )
+    
+    @field_validator('chunk_overlap_tokens')
+    def validate_overlap(cls, v, values):
+        max_size = values.get('max_chunk_size_tokens', 800)
+        if v > max_size // 2:
+            raise ValueError(f"Overlap ({v}) must not exceed half of max_chunk_size_tokens ({max_size})")
+        return v
+
+
+class StaticChunkingStrategy(BaseModel):
+    type: ChunkingStrategyType = Field(ChunkingStrategyType.STATIC, const=True)
+    static: StaticChunkingConfig
+
+
+ChunkingStrategy = Union[AutoChunkingStrategy, StaticChunkingStrategy]
+
+
+class ExpirationPolicy(BaseModel):
+    anchor: str = Field("last_active_at", description="Anchor timestamp for expiration")
+    days: int = Field(..., ge=1, description="Days after anchor when store expires")
+
+
+class VectorStoreStatus(str, Enum):
+    EXPIRED = "expired"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class FileCounts(BaseModel):
+    in_progress: int = 0
+    completed: int = 0
+    failed: int = 0
+    cancelled: int = 0
+    total: int = 0
+
+
+class VectorStoreRequest(BaseModel):
+    """OpenAI-compatible vector store creation request"""
+    name: Optional[str] = Field(None, description="Name of the vector store")
+    file_ids: Optional[List[str]] = Field(default_factory=list, description="File IDs to include")
+    expires_after: Optional[ExpirationPolicy] = None
+    chunking_strategy: Optional[ChunkingStrategy] = Field(default_factory=AutoChunkingStrategy)
+    metadata: Optional[Dict[str, str]] = Field(
+        default_factory=dict,
+        description="Key-value pairs for metadata (max 16 pairs)"
+    )
+    
+    @field_validator('metadata')
+    def validate_metadata(cls, v):
+        if len(v) > 16:
+            raise ValueError("Metadata can have maximum 16 key-value pairs")
+        for key, value in v.items():
+            if len(key) > 64:
+                raise ValueError(f"Metadata key '{key}' exceeds 64 character limit")
+            if len(value) > 512:
+                raise ValueError(f"Metadata value for '{key}' exceeds 512 character limit")
+        return v
+
+
+class VectorStoreResponse(BaseModel):
+    """OpenAI-compatible vector store response"""
+    id: str = Field(..., description="Vector store ID")
+    object: str = Field("vector_store", const=True)
+    created_at: int = Field(..., description="Unix timestamp of creation")
+    name: Optional[str] = None
+    usage_bytes: int = Field(0, description="Total bytes used")
+    file_counts: FileCounts = Field(default_factory=FileCounts)
+    status: VectorStoreStatus = VectorStoreStatus.COMPLETED
+    expires_after: Optional[ExpirationPolicy] = None
+    expires_at: Optional[int] = None
+    last_active_at: Optional[int] = None
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class VectorStoreListResponse(BaseModel):
+    """OpenAI-compatible list response"""
+    object: str = Field("list", const=True)
+    data: List[VectorStoreResponse]
+    first_id: Optional[str] = None
+    last_id: Optional[str] = None
+    has_more: bool = False
+
+
+class VectorStoreDeleteResponse(BaseModel):
+    """OpenAI-compatible delete response"""
+    id: str
+    object: str = Field("vector_store.deleted", const=True)
+    deleted: bool = True
+
+
+# Vector Store File Models
+
+class VectorStoreFileStatus(str, Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class VectorStoreFileError(BaseModel):
+    code: str = Field(..., description="Error code")
+    message: str = Field(..., description="Error message")
+
+
+class VectorStoreFileRequest(BaseModel):
+    """OpenAI-compatible vector store file creation request"""
+    file_id: str = Field(..., description="File ID to attach")
+    attributes: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    chunking_strategy: Optional[ChunkingStrategy] = Field(default_factory=AutoChunkingStrategy)
+
+
+class VectorStoreFileResponse(BaseModel):
+    """OpenAI-compatible vector store file response"""
+    id: str = Field(..., description="File ID")
+    object: str = Field("vector_store.file", const=True)
+    usage_bytes: int = 0
+    created_at: int
+    vector_store_id: str
+    status: VectorStoreFileStatus = VectorStoreFileStatus.COMPLETED
+    last_error: Optional[VectorStoreFileError] = None
+    chunking_strategy: Optional[Dict[str, Any]] = None
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VectorStoreFileListResponse(BaseModel):
+    """OpenAI-compatible file list response"""
+    object: str = Field("list", const=True)
+    data: List[VectorStoreFileResponse]
+    first_id: Optional[str] = None
+    last_id: Optional[str] = None
+    has_more: bool = False
+
+
+class VectorStoreFileDeleteResponse(BaseModel):
+    """OpenAI-compatible file delete response"""
+    id: str
+    object: str = Field("vector_store.file.deleted", const=True)
+    deleted: bool = True
+
+
+# Search Models
+
+class ComparisonOperator(str, Enum):
+    EQ = "eq"
+    NE = "ne"
+    GT = "gt"
+    GTE = "gte"
+    LT = "lt"
+    LTE = "lte"
+
+
+class ComparisonFilter(BaseModel):
+    type: ComparisonOperator
+    key: str
+    value: Union[str, int, float, bool]
+
+
+class CompoundOperator(str, Enum):
+    AND = "and"
+    OR = "or"
+
+
+class CompoundFilter(BaseModel):
+    type: CompoundOperator
+    filters: List[Union[ComparisonFilter, "CompoundFilter"]]
+
+
+SearchFilter = Union[ComparisonFilter, CompoundFilter]
+
+
+class RankingOptions(BaseModel):
+    ranker: str = Field("auto", description="Ranking algorithm")
+    score_threshold: float = Field(0.0, ge=0.0, le=1.0)
+
+
+class VectorStoreSearchRequest(BaseModel):
+    """OpenAI-compatible search request"""
+    query: Union[str, List[str]] = Field(..., description="Search query")
+    filters: Optional[SearchFilter] = None
+    max_num_results: int = Field(10, ge=1, le=50)
+    ranking_options: Optional[RankingOptions] = None
+    rewrite_query: bool = False
+
+
+class SearchResultContent(BaseModel):
+    type: str = "text"
+    text: str
+
+
+class SearchResult(BaseModel):
+    file_id: str
+    filename: str
+    score: float
+    attributes: Dict[str, Any]
+    content: List[SearchResultContent]
+
+
+class VectorStoreSearchResponse(BaseModel):
+    """OpenAI-compatible search response"""
+    object: str = Field("vector_store.search_results.page", const=True)
+    search_query: str
+    data: List[SearchResult]
+    has_more: bool = False
+    next_page: Optional[str] = None
+
+
+# Allow recursive compound filters
+CompoundFilter.model_rebuild()
+```
+
+**Why this change:** This file defines all the OpenAI-compatible request and response models that match the exact schema specification from OpenAI's Vector Store API. These models ensure proper validation and serialization of data when interfacing with OpenAI-style clients.
+
+### 2. Vector Store SDK
+
+**File: `src/integrations/vector_store_sdk.py`** (NEW)
+
+```python
+import json
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
+
+import httpx
+from fastapi import HTTPException, status
+
+from src.config import get_settings
+from src.logging_config import Logger
+from src.models.openai_vector_store import (
+    VectorStoreRequest,
+    VectorStoreResponse,
+    VectorStoreListResponse,
+    VectorStoreDeleteResponse,
+    VectorStoreFileRequest,
+    VectorStoreFileResponse,
+    VectorStoreFileListResponse,
+    VectorStoreFileDeleteResponse,
+    VectorStoreSearchRequest,
+    VectorStoreSearchResponse,
+    FileCounts,
+    VectorStoreStatus,
+    VectorStoreFileStatus
+)
+from src.models.storage_payload import Document, StorageBackend
+from src.models.collection_payload import CreateCollection, DeleteCollection
+from src.models.indexing_payload import IndexingPayload
+
+logger = Logger.create_logger(__name__)
+settings = get_settings()
+
+
+class VectorStoreSDK:
+    """SDK for managing vector stores in an OpenAI-compatible manner"""
+    
+    def __init__(self, base_url: str, api_key: str, verify: bool = True):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.verify = verify
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+    async def create_vector_store(
+        self, 
+        request: VectorStoreRequest,
+        storage_backend: StorageBackend = StorageBackend.PGVECTOR
+    ) -> VectorStoreResponse:
+        """Create a new vector store"""
+        
+        # Transform OpenAI request to internal format
+        internal_request = CreateCollection(
+            collection=request.name or f"vs_{datetime.now().timestamp()}",
+            model_name=settings.default_model_embeddings  # Use default embedding model
+        )
+        
+        async with httpx.AsyncClient(verify=self.verify) as client:
+            # First create the collection
+            response = await client.post(
+                f"{self.base_url}/v1/api/collection/create",
+                headers=self.headers,
+                json=internal_request.dict()
+            )
+            response.raise_for_status()
+            
+            collection_data = response.json()
+            
+            # Transform to OpenAI response format
+            return VectorStoreResponse(
+                id=collection_data["collection"],
+                created_at=int(datetime.now().timestamp()),
+                name=request.name,
+                usage_bytes=0,
+                file_counts=FileCounts(),
+                status=VectorStoreStatus.COMPLETED,
+                expires_after=request.expires_after,
+                metadata=request.metadata or {}
+            )
+    
+    async def list_vector_stores(
+        self,
+        limit: int = 20,
+        order: str = "desc",
+        after: Optional[str] = None,
+        before: Optional[str] = None
+    ) -> VectorStoreListResponse:
+        """List all vector stores"""
+        
+        async with httpx.AsyncClient(verify=self.verify) as client:
+            response = await client.get(
+                f"{self.base_url}/v1/api/collection",
+                headers=self.headers
+            )
+            response.raise_for_status()
+            
+            collections = response.json().get("collections", [])
+            
+            # Transform to OpenAI format
+            vector_stores = []
+            for collection_name in collections:
+                # Get collection details
+                detail_response = await client.get(
+                    f"{self.base_url}/v1/api/collection/data",
+                    headers=self.headers,
+                    params={"collection": collection_name, "limit": 1}
+                )
+                
+                if detail_response.status_code == 200:
+                    details = detail_response.json()
+                    vector_stores.append(
+                        VectorStoreResponse(
+                            id=collection_name,
+                            created_at=int(datetime.now().timestamp()),
+                            name=collection_name,
+                            usage_bytes=0,
+                            file_counts=FileCounts(
+                                completed=details.get("total", 0),
+                                total=details.get("total", 0)
+                            ),
+                            status=VectorStoreStatus.COMPLETED
+                        )
+                    )
+            
+            # Apply pagination logic here if needed
+            first_id = vector_stores[0].id if vector_stores else None
+            last_id = vector_stores[-1].id if vector_stores else None
+            
+            return VectorStoreListResponse(
+                data=vector_stores[:limit],
+                first_id=first_id,
+                last_id=last_id,
+                has_more=len(vector_stores) > limit
+            )
+    
+    async def retrieve_vector_store(self, vector_store_id: str) -> VectorStoreResponse:
+        """Retrieve a specific vector store"""
+        
+        async with httpx.AsyncClient(verify=self.verify) as client:
+            # Check if collection exists by getting its data
+            response = await client.get(
+                f"{self.base_url}/v1/api/collection/data",
+                headers=self.headers,
+                params={"collection": vector_store_id, "limit": 1}
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Vector store '{vector_store_id}' not found"
+                )
+            
+            details = response.json()
+            
+            return VectorStoreResponse(
+                id=vector_store_id,
+                created_at=int(datetime.now().timestamp()),
+                name=vector_store_id,
+                usage_bytes=0,
+                file_counts=FileCounts(
+                    completed=details.get("total", 0),
+                    total=details.get("total", 0)
+                ),
+                status=VectorStoreStatus.COMPLETED
+            )
+    
+    async def delete_vector_store(self, vector_store_id: str) -> VectorStoreDeleteResponse:
+        """Delete a vector store"""
+        
+        internal_request = DeleteCollection(collection=vector_store_id)
+        
+        async with httpx.AsyncClient(verify=self.verify) as client:
+            response = await client.delete(
+                f"{self.base_url}/v1/api/collection/delete",
+                headers=self.headers,
+                json=internal_request.dict()
+            )
+            response.raise_for_status()
+            
+            return VectorStoreDeleteResponse(
+                id=vector_store_id,
+                deleted=True
+            )
+    
+    async def create_vector_store_file(
+        self,
+        vector_store_id: str,
+        file_content: str,
+        file_metadata: Optional[Dict[str, Any]] = None,
+        storage_backend: StorageBackend = StorageBackend.PGVECTOR
+    ) -> VectorStoreFileResponse:
+        """Add a file/document to a vector store"""
+        
+        # Create document from file content
+        document = Document(
+            content=file_content,
+            links=[],
+            author=file_metadata.get("author") if file_metadata else None,
+            topics=file_metadata.get("topics") if file_metadata else [],
+            metadata=file_metadata or {}
+        )
+        
+        internal_request = IndexingPayload(
+            storage_backend=storage_backend,
+            collection=vector_store_id,
+            documents=[document]
+        )
+        
+        async with httpx.AsyncClient(verify=self.verify) as client:
+            response = await client.post(
+                f"{self.base_url}/v1/api/index",
+                headers=self.headers,
+                json=internal_request.dict()
+            )
+            response.raise_for_status()
+            
+            # Generate a file ID (in real implementation, this should be returned from the index endpoint)
+            import uuid
+            file_id = str(uuid.uuid4())
+            
+            return VectorStoreFileResponse(
+                id=file_id,
+                created_at=int(datetime.now().timestamp()),
+                vector_store_id=vector_store_id,
+                usage_bytes=len(file_content.encode()),
+                status=VectorStoreFileStatus.COMPLETED,
+                attributes=file_metadata or {}
+            )
+    
+    async def list_vector_store_files(
+        self,
+        vector_store_id: str,
+        limit: int = 20,
+        order: str = "desc",
+        filter: Optional[str] = None
+    ) -> VectorStoreFileListResponse:
+        """List files in a vector store"""
+        
+        async with httpx.AsyncClient(verify=self.verify) as client:
+            response = await client.get(
+                f"{self.base_url}/v1/api/collection/data",
+                headers=self.headers,
+                params={"collection": vector_store_id, "limit": limit}
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Vector store '{vector_store_id}' not found"
+                )
+            
+            details = response.json()
+            files = []
+            
+            for doc in details.get("details", []):
+                files.append(
+                    VectorStoreFileResponse(
+                        id=doc["id"],
+                        created_at=int(datetime.fromisoformat(
+                            doc["created_at"]).timestamp()
+                        ),
+                        vector_store_id=vector_store_id,
+                        usage_bytes=len(doc.get("content", "").encode()),
+                        status=VectorStoreFileStatus.COMPLETED,
+                        attributes=doc.get("meta_data", {})
+                    )
+                )
+            
+            return VectorStoreFileListResponse(
+                data=files,
+                first_id=files[0].id if files else None,
+                last_id=files[-1].id if files else None,
+                has_more=details.get("total", 0) > limit
+            )
+    
+    async def search_vector_store(
+        self,
+        vector_store_id: str,
+        request: VectorStoreSearchRequest,
+        storage_backend: StorageBackend = StorageBackend.PGVECTOR
+    ) -> VectorStoreSearchResponse:
+        """Search within a vector store"""
+        
+        from src.models.storage_payload import SearchRequest, SearchType
+        
+        # Transform OpenAI search request to internal format
+        query_text = request.query if isinstance(request.query, str) else " ".join(request.query)
+        
+        internal_request = SearchRequest(
+            collection=vector_store_id,
+            search_type=SearchType.HYBRID,  # Use hybrid search for best results
+            storage_backend=storage_backend,
+            search_text=query_text,
+            limit=request.max_num_results,
+            min_score=request.ranking_options.score_threshold if request.ranking_options else 0.0
+        )
+        
+        async with httpx.AsyncClient(verify=self.verify) as client:
+            response = await client.post(
+                f"{self.base_url}/v1/api/search",
+                headers=self.headers,
+                json=internal_request.dict()
+            )
+            response.raise_for_status()
+            
+            search_results = response.json()
+            
+            # Transform to OpenAI format
+            results = []
+            for result in search_results.get("results", []):
+                results.append(
+                    SearchResult(
+                        file_id=result["id"],
+                        filename=f"doc_{result['id'][:8]}",
+                        score=result.get("score", 0.0),
+                        attributes=result["source"].get("meta_data", {}),
+                        content=[
+                            SearchResultContent(
+                                type="text",
+                                text=result["source"].get("content", "")
+                            )
+                        ]
+                    )
+                )
+            
+            return VectorStoreSearchResponse(
+                search_query=query_text,
+                data=results,
+                has_more=False
+            )
+```
+
+**Why this change:** This SDK provides a clean interface for interacting with vector stores in an OpenAI-compatible way. It handles the transformation between OpenAI's API schema and the internal system's schema, making it easy for clients expecting OpenAI-style responses to work with the system.
+
+### 3. ElasticSearch Integration
+
+**File: `src/repository/registry/elasticsearch.py`** (NEW)
+
+```python
+import asyncio
+from typing import Any, Dict, List, Optional
+from contextlib import asynccontextmanager
+
+from elasticsearch import AsyncElasticsearch, helpers
+from elasticsearch.exceptions import NotFoundError, ConnectionError as ESConnectionError
+
+from src.config import get_settings
+from src.logging_config import Logger
+from src.repository.registry import storage_backend_registry
+from src.repository.registry.database import Database
+from src.models.registry_metadata import Base
+
+logger = Logger.create_logger(__name__)
+settings = get_settings()
+
+
+@storage_backend_registry.register(name="elasticsearch")
+class ElasticSearchDB(Database):
+    """ElasticSearch implementation for vector storage"""
+    
+    def __init__(
+        self,
+        hosts: Optional[List[str]] = None,
+        cloud_id: Optional[str] = None,
+        api_key: Optional[str] = None,
+        verify_certs: bool = True
+    ):
+        """Initialize ElasticSearch connection
+        
+        Args:
+            hosts: List of ElasticSearch hosts
+            cloud_id: Elastic Cloud ID (if using Elastic Cloud)
+            api_key: API key for authentication
+            verify_certs: Whether to verify SSL certificates
+        """
+        self.hosts = hosts or ["http://localhost:9200"]
+        self.cloud_id = cloud_id
+        self.api_key = api_key
+        self.verify_certs = verify_certs
+        self.client: Optional[AsyncElasticsearch] = None
+        self.connect()
+    
+    def connect(self) -> None:
+        """Establish connection to ElasticSearch"""
+        try:
+            if self.cloud_id:
+                # Connect to Elastic Cloud
+                self.client = AsyncElasticsearch(
+                    cloud_id=self.cloud_id,
+                    api_key=self.api_key,
+                    verify_certs=self.verify_certs
+                )
+            else:
+                # Connect to self-hosted ElasticSearch
+                self.client = AsyncElasticsearch(
+                    hosts=self.hosts,
+                    api_key=self.api_key if self.api_key else None,
+                    verify_certs=self.verify_certs
+                )
+            
+            logger.info("Successfully connected to ElasticSearch")
+        except Exception as e:
+            logger.error(f"Failed to connect to ElasticSearch: {str(e)}")
+            raise ESConnectionError(f"ElasticSearch connection failed: {str(e)}")
+    
+    @asynccontextmanager
+    async def get_client(self):
+        """Context manager for ElasticSearch client"""
+        if not self.client:
+            self.connect()
+        try:
+            yield self.client
+        finally:
+            pass  # Keep connection alive for reuse
+    
+    async def close(self):
+        """Close ElasticSearch connection"""
+        if self.client:
+            await self.client.close()
+            self.client = None
+    
+    def create_table(
+        self, 
+        table_name: str, 
+        schema: Optional[Dict[str, Any]] = None,
+        **kwargs: Any
+    ) -> None:
+        """Create an ElasticSearch index with proper mapping for vector search
+        
+        Args:
+            table_name: Name of the index
+            schema: Optional schema definition
+            **kwargs: Additional arguments (e.g., dimensions for vector field)
+        """
+        asyncio.run(self._create_index(table_name, kwargs.get("dimensions", 1024)))
+    
+    async def _create_index(self, index_name: str, dimensions: int) -> None:
+        """Internal async method to create index"""
+        async with self.get_client() as client:
+            # Define mapping for vector search
+            mapping = {
+                "mappings": {
+                    "properties": {
+                        "id": {"type": "keyword"},
+                        "content": {
+                            "type": "text",
+                            "analyzer": "standard",
+                            "fields": {
+                                "keyword": {"type": "keyword", "ignore_above": 256}
+                            }
+                        },
+                        "embedding": {
+                            "type": "dense_vector",
+                            "dims": dimensions,
+                            "index": True,
+                            "similarity": "cosine"
+                        },
+                        "links": {"type": "keyword"},
+                        "topics": {"type": "keyword"},
+                        "author": {"type": "keyword"},
+                        "meta_data": {"type": "object", "enabled": True},
+                        "created_at": {"type": "date"},
+                        "search_vector": {"type": "text"}  # For full-text search
+                    }
+                },
+                "settings": {
+                    "number_of_shards": 2,
+                    "number_of_replicas": 1,
+                    "index": {
+                        "similarity": {
+                            "default": {
+                                "type": "BM25"  # For better text search
+                            }
+                        }
+                    }
+                }
+            }
+            
+            try:
+                await client.indices.create(index=index_name, body=mapping)
+                logger.info(f"Created ElasticSearch index: {index_name}")
+            except Exception as e:
+                if "resource_already_exists_exception" in str(e).lower():
+                    logger.info(f"Index {index_name} already exists")
+                else:
+                    logger.error(f"Failed to create index {index_name}: {str(e)}")
+                    raise
+    
+    async def search(
+        self,
+        document_table: type,  # Not used in ES, but kept for interface compatibility
+        query_vector: List[float],
+        min_similarity_score: float = 0.5,
+        top_k: int = 10,
+        index_name: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Perform vector similarity search in ElasticSearch
+        
+        Args:
+            document_table: ORM model (not used in ES)
+            query_vector: Query embedding vector
+            min_similarity_score: Minimum similarity threshold
+            top_k: Number of results to return
+            index_name: Name of the index to search
+            filters: Additional filters to apply
+        
+        Returns:
+            List of matching documents
+        """
+        if not index_name:
+            raise ValueError("index_name is required for ElasticSearch search")
+        
+        async with self.get_client() as client:
+            # Build the query
+            query_body = {
+                "size": top_k,
+                "min_score": min_similarity_score,
+                "query": {
+                    "script_score": {
+                        "query": {"match_all": {}} if not filters else {"bool": {"filter": filters}},
+                        "script": {
+                            "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                            "params": {"query_vector": query_vector}
+                        }
+                    }
+                }
+            }
+            
+            try:
+                response = await client.search(index=index_name, body=query_body)
+                
+                results = []
+                for hit in response["hits"]["hits"]:
+                    doc = hit["_source"]
+                    doc["score"] = hit["_score"] - 1.0  # Adjust score back
+                    doc["id"] = hit["_id"]
+                    results.append(doc)
+                
+                return results
+            except Exception as e:
+                logger.error(f"Search failed in index {index_name}: {str(e)}")
+                raise
+    
+    async def insert(self, data: Base) -> None:
+        """Insert a single document into ElasticSearch
+        
+        Args:
+            data: Document to insert
+        """
+        # This method needs the index name - typically passed via the data object
+        # For now, we'll use a default or extract from data
+        index_name = getattr(data, '__tablename__', 'default_index')
+        
+        async with self.get_client() as client:
+            doc_dict = {
+                key: value for key, value in vars(data).items() 
+                if not key.startswith('_')
+            }
+            
+            try:
+                await client.index(
+                    index=index_name,
+                    document=doc_dict,
+                    id=doc_dict.get('id')
+                )
+                logger.debug(f"Inserted document into {index_name}")
+            except Exception as e:
+                logger.error(f"Failed to insert document: {str(e)}")
+                raise
+    
+    async def bulk_insert(self, documents: List[Base], index_name: str = None) -> None:
+        """Bulk insert documents into ElasticSearch
+        
+        Args:
+            documents: List of documents to insert
+            index_name: Target index name
+        """
+        if not documents:
+            return
+        
+        if not index_name:
+            index_name = getattr(documents[0], '__tablename__', 'default_index')
+        
+        async with self.get_client() as client:
+            actions = []
+            for doc in documents:
+                doc_dict = {
+                    key: value for key, value in vars(doc).items() 
+                    if not key.startswith('_')
+                }
+                
+                action = {
+                    "_index": index_name,
+                    "_id": doc_dict.get('id'),
+                    "_source": doc_dict
+                }
+                actions.append(action)
+            
+            try:
+                # Use bulk API for efficient insertion
+                success, failed = await helpers.async_bulk(
+                    client, 
+                    actions,
+                    chunk_size=100,
+                    request_timeout=30
+                )
+                
+                logger.info(f"Bulk inserted {success} documents into {index_name}")
+                if failed:
+                    logger.warning(f"Failed to insert {len(failed)} documents")
+            except Exception as e:
+                logger.error(f"Bulk insert failed: {str(e)}")
+                raise
+    
+    def index(self) -> None:
+        """Refresh all indices (not typically needed in ES)"""
+        asyncio.run(self._refresh_indices())
+    
+    async def _refresh_indices(self):
+        """Refresh all indices to make documents searchable immediately"""
+        async with self.get_client() as client:
+            try:
+                await client.indices.refresh(index="*")
+                logger.info("Refreshed all ElasticSearch indices")
+            except Exception as e:
+                logger.error(f"Failed to refresh indices: {str(e)}")
+    
+    async def delete_index(self, index_name: str) -> bool:
+        """Delete an ElasticSearch index
+        
+        Args:
+            index_name: Name of the index to delete
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        async with self.get_client() as client:
+            try:
+                await client.indices.delete(index=index_name)
+                logger.info(f"Deleted index: {index_name}")
+                return True
+            except NotFoundError:
+                logger.warning(f"Index {index_name} not found")
+                return False
+            except Exception as e:
+                logger.error(f"Failed to delete index {index_name}: {str(e)}")
+                raise
+    
+    async def hybrid_search(
+        self,
+        index_name: str,
+        query_text: str,
+        query_vector: Optional[List[float]] = None,
+        min_score: float = 0.5,
+        top_k: int = 10,
+        vector_weight: float = 0.6,
+        text_weight: float = 0.4
+    ) -> List[Dict[str, Any]]:
+        """Perform hybrid search combining vector and text search
+        
+        Args:
+            index_name: Index to search
+            query_text: Text query
+            query_vector: Optional query vector
+            min_score: Minimum score threshold
+            top_k: Number of results
+            vector_weight: Weight for vector search (0-1)
+            text_weight: Weight for text search (0-1)
+        
+        Returns:
+            List of search results
+        """
+        async with self.get_client() as client:
+            # Build hybrid query
+            should_clauses = []
+            
+            # Add text search clause
+            if query_text:
+                should_clauses.append({
+                    "multi_match": {
+                        "query": query_text,
+                        "fields": ["content^2", "topics", "author"],
+                        "type": "best_fields",
+                        "boost": text_weight
+                    }
+                })
+            
+            # Add vector search clause if vector is provided
+            if query_vector:
+                should_clauses.append({
+                    "script_score": {
+                        "query": {"match_all": {}},
+                        "script": {
+                            "source": f"cosineSimilarity(params.query_vector, 'embedding') * {vector_weight}",
+                            "params": {"query_vector": query_vector}
+                        }
+                    }
+                })
+            
+            query_body = {
+                "size": top_k,
+                "min_score": min_score,
+                "query": {
+                    "bool": {
+                        "should": should_clauses,
+                        "minimum_should_match": 1
+                    }
+                }
+            }
+            
+            try:
+                response = await client.search(index=index_name, body=query_body)
+                
+                results = []
+                for hit in response["hits"]["hits"]:
+                    doc = hit["_source"]
+                    doc["score"] = hit["_score"]
+                    doc["id"] = hit["_id"]
+                    results.append(doc)
+                
+                return results
+            except Exception as e:
+                logger.error(f"Hybrid search failed: {str(e)}")
+                raise
+```
+
+**Why this change:** This file implements the ElasticSearch adapter that conforms to the Database interface. It provides full support for vector search, text search, and hybrid search capabilities using ElasticSearch's dense_vector field type and advanced query DSL.
+
+### 4. ElasticSearch Document Store Service
+
+**File: `src/services/elasticsearch_document_store.py`** (NEW)
+
+```python
+import asyncio
+import json
+import time
+from typing import List, Optional
+
+from src.config import Settings, get_settings
+from src.exception.document_store_exception import (
+    DocumentStoreDeleteError,
+    DocumentStoreIndexingError,
+    DocumentStoreSearchError,
+)
+from src.logging_config import Logger
+from src.models.search_request import SearchType
+from src.models.storage_payload import (
+    Document,
+    SearchRequest,
+    SearchResponse,
+    SearchResult,
+)
+from src.repository.registry.elasticsearch import ElasticSearchDB
+from src.services.abstract_document_store import AbstractDocumentStore
+from src.services.embedding_service import EmbeddingService
+
+logger = Logger.create_logger(__name__)
+
+
+class ElasticSearchDocumentStore(AbstractDocumentStore):
+    """ElasticSearch implementation of document store"""
+    
+    def __init__(
+        self,
+        es_client: ElasticSearchDB,
+        embedding_service: EmbeddingService,
+        settings: Settings = get_settings()
+    ):
+        """Initialize ElasticSearch document store
+        
+        Args:
+            es_client: ElasticSearch database client
+            embedding_service: Service for generating embeddings
+            settings: Application settings
+        """
+        self.es_client = es_client
+        self.embedding_service = embedding_service
+        self.settings = settings
+    
+    async def index(
+        self,
+        documents: List[Document],
+        collection: str,
+        model_name: str,
+        context_length: int,
+        model_path: str
+    ) -> None:
+        """Index documents into ElasticSearch
+        
+        Args:
+            documents: List of documents to index
+            collection: Collection/index name
+            model_name: Embedding model name
+            context_length: Maximum context length
+            model_path: Path to model
+        """
+        try:
+            # Generate embeddings for all documents
+            content_list = [doc.content for doc in documents]
+            embeddings = await self.embedding_service.get_embeddings(
+                model_name=model_name,
+                batch=content_list
+            )
+            
+            # Prepare documents for ElasticSearch
+            es_documents = []
+            for i, doc in enumerate(documents):
+                es_doc = {
+                    "id": str(doc.metadata.get("id")) if doc.metadata and "id" in doc.metadata else None,
+                    "content": doc.content,
+                    "embedding": embeddings.data[i].embedding,
+                    "links": doc.links or [],
+                    "topics": doc.topics or [],
+                    "author": doc.author,
+                    "meta_data": doc.metadata or {},
+                    "created_at": time.time() * 1000,  # Milliseconds for ES
+                    "search_vector": doc.content  # For text search
+                }
+                es_documents.append(es_doc)
+            
+            # Bulk insert into ElasticSearch
+            await self.es_client.bulk_insert(es_documents, index_name=collection)
+            logger.info(f"Successfully indexed {len(documents)} documents into {collection}")
+            
+        except Exception as e:
+            logger.exception(f"Failed to index documents into ElasticSearch collection {collection}")
+            raise DocumentStoreIndexingError(f"ElasticSearch indexing failed: {str(e)}")
+    
+    async def search(
+        self,
+        search_request: SearchRequest,
+        model_name: str,
+        context_length: int,
+        model_path: str
+    ) -> SearchResponse:
+        """Search documents in ElasticSearch
+        
+        Args:
+            search_request: Search request parameters
+            model_name: Embedding model name
+            context_length: Maximum context length
+            model_path: Path to model
+        
+        Returns:
+            Search response with results
+        """
+        try:
+            start_time = time.time()
+            results = []
+            
+            # Build filters for ElasticSearch
+            filters = []
+            if search_request.link_filter:
+                filters.append({"terms": {"links": search_request.link_filter}})
+            if search_request.topic_filter:
+                filters.append({"terms": {"topics": search_request.topic_filter}})
+            if search_request.content_filter:
+                # Add text match filters for content
+                for term in search_request.content_filter:
+                    filters.append({"match": {"content": term}})
+            
+            filter_query = {"bool": {"must": filters}} if filters else None
+            
+            if search_request.search_type == SearchType.SEMANTIC:
+                # Vector search
+                embeddings = await self.embedding_service.get_embeddings(
+                    model_name=model_name,
+                    batch=[search_request.search_text]
+                )
+                query_vector = embeddings.data[0].embedding
+                
+                es_results = await self.es_client.search(
+                    document_table=None,  # Not used in ES
+                    query_vector=query_vector,
+                    min_similarity_score=search_request.min_score,
+                    top_k=search_request.limit,
+                    index_name=search_request.collection,
+                    filters=filter_query
+                )
+                
+            elif search_request.search_type == SearchType.FULL_TEXT:
+                # Text search using ES's native capabilities
+                async with self.es_client.get_client() as client:
+                    query_body = {
+                        "size": search_request.limit,
+                        "min_score": search_request.min_score,
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {
+                                        "multi_match": {
+                                            "query": search_request.search_text,
+                                            "fields": ["content^2", "topics", "author"],
+                                            "type": "best_fields"
+                                        }
+                                    }
+                                ],
+                                "filter": filters if filters else []
+                            }
+                        }
+                    }
+                    
+                    response = await client.search(
+                        index=search_request.collection,
+                        body=query_body
+                    )
+                    
+                    es_results = []
+                    for hit in response["hits"]["hits"]:
+                        doc = hit["_source"]
+                        doc["score"] = hit["_score"]
+                        doc["id"] = hit["_id"]
+                        es_results.append(doc)
+            
+            else:  # HYBRID search
+                # Combine vector and text search
+                embeddings = await self.embedding_service.get_embeddings(
+                    model_name=model_name,
+                    batch=[search_request.search_text]
+                )
+                query_vector = embeddings.data[0].embedding
+                
+                es_results = await self.es_client.hybrid_search(
+                    index_name=search_request.collection,
+                    query_text=search_request.search_text,
+                    query_vector=query_vector,
+                    min_score=search_request.min_score,
+                    top_k=search_request.limit,
+                    vector_weight=0.6,
+                    text_weight=0.4
+                )
+            
+            # Transform ES results to SearchResult format
+            for es_doc in es_results:
+                results.append(
+                    SearchResult(
+                        id=es_doc.get("id", ""),
+                        score=round(es_doc.get("score", 0.0), 4),
+                        source={
+                            "id": es_doc.get("id"),
+                            "content": es_doc.get("content"),
+                            "links": es_doc.get("links"),
+                            "topics": es_doc.get("topics"),
+                            "author": es_doc.get("author"),
+                            "meta_data": es_doc.get("meta_data"),
+                            "created_at": es_doc.get("created_at")
+                        }
+                    )
+                )
+            
+            query_time_ms = round((time.time() - start_time) * 1000, 2)
+            
+            return SearchResponse(
+                results=results,
+                total=len(results),
+                query_time_ms=query_time_ms
+            )
+            
+        except Exception as e:
+            logger.exception(f"Search failed in ElasticSearch collection {search_request.collection}")
+            raise DocumentStoreSearchError(f"ElasticSearch search failed: {str(e)}")
+    
+    async def delete(self, collection: str) -> None:
+        """Delete all documents in a collection/index
+        
+        Args:
+            collection: Collection/index name to delete
+        """
+        try:
+            # Delete the entire index
+            success = await self.es_client.delete_index(collection)
+            if success:
+                logger.info(f"Successfully deleted ElasticSearch index: {collection}")
+            else:
+                logger.warning(f"Index {collection} may not exist")
+        except Exception as e:
+            logger.exception(f"Failed to delete ElasticSearch index {collection}")
+            raise DocumentStoreDeleteError(f"ElasticSearch deletion failed: {str(e)}")
+    
+    async def delete_by_ids(self, collection: str, document_ids: List[str]) -> int:
+        """Delete specific documents by their IDs
+        
+        Args:
+            collection: Collection/index name
+            document_ids: List of document IDs to delete
+        
+        Returns:
+            Number of documents deleted
+        """
+        try:
+            deleted_count = 0
+            async with self.es_client.get_client() as client:
+                for doc_id in document_ids:
+                    try:
+                        await client.delete(index=collection, id=doc_id)
+                        deleted_count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to delete document {doc_id}: {str(e)}")
+            
+            logger.info(f"Deleted {deleted_count} documents from {collection}")
+            return deleted_count
+            
+        except Exception as e:
+            logger.exception(f"Failed to delete documents by IDs in {collection}")
+            raise DocumentStoreDeleteError(f"ElasticSearch deletion by IDs failed: {str(e)}")
+```
+
+**Why this change:** This service implements the AbstractDocumentStore interface for ElasticSearch, providing all the necessary operations (index, search, delete) while leveraging ElasticSearch's powerful search capabilities including hybrid search that combines vector similarity and text relevance.
+
+### 5. Updated Storage Backend Enum
+
+**File: `src/models/storage_payload.py`** (UPDATE)
+
+Add ELASTICSEARCH to the StorageBackend enum:
+
+```python
+class StorageBackend(str, Enum):
+    PGVECTOR = "pgvector"
+    ELASTICSEARCH = "elasticsearch"  # ADD THIS LINE
+```
+
+### 6. Updated API Routers for OpenAI Compatibility
+
+**File: `src/api/routers/openai_vector_store_router.py`** (NEW)
+
+```python
+"""OpenAI-compatible vector store API router"""
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from fastapi.responses import JSONResponse
+
+from src.api.deps import (
+    get_openai_service,
+    validate_headers_and_api_key,
+    get_embedding_service
+)
+from src.config import get_settings
+from src.integrations.vector_store_sdk import VectorStoreSDK
+from src.logging_config import Logger
+from src.models.headers import HeaderInformation
+from src.models.openai_vector_store import (
