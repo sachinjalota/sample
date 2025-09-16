@@ -1,5 +1,6 @@
-
-## Complete Project Structure:
+──────────────────────────────
+Complete Project Structure:
+──────────────────────────────
 genai_platform_services/
     Dockerfile
     init.sh
@@ -6657,7 +6658,9 @@ def detect_document_type(url: str) -> str:
     else:
         raise HTTPException(status_code=404, detail="Document type not supported. Please upload only pdf/jpeg/jpg/png")
 
-## Sample Curls and responses
+───────────────────────────────────
+Sample CURL Requests and Responses:
+───────────────────────────────────
 
 1. curl --location --request POST 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/collection/create' \
 --header 'x-session-id: 1234' \
@@ -6978,22 +6981,37 @@ Response - curl --location --request DELETE 'https://genai-core-uat.hdfcbankuat.
     "collection": "Sachin_Test"
 }'
 
+──────────────────────────────
+Task Instructions:
+──────────────────────────────
 
-Now Go through the above code repo and curl examples of few api routers very thoroughly and analyse it like a pro software developer. I have few requirements for you, listed below
-1. Make the Vector Index related APIs compatible with OpenAI Vector Store API attached below with url and content for your reference i.e. all the payload should follow openai api schema refernce.
-     v1/api/collection, vi/api/collection/data, vi/api/collection/create, vi/api/collection/delete, vi/api/index, vi/api/search, vi/api/delete_index, vi/api/collection/delete_by_ids, vi/api/rag - all related to vector store/index related.
-   The 'OpenAI Vector Store API Doc Reference' below refers to Vector Store and Vectore Store Files which have their defined examples. In prder to perfeom above task very carefuly and responsibly, use your analytics to best match existing vector create/index/search related of my project with the API Doc Reference and provide a table for my understanding to know which of my existing API is mapped with which of OpenAI Vector Store/Files api schema
-   Note:
-   - Keep the best standards for coding
-   - Try if we can create an sdk for OpenAI vector stores or vector store files, something similar to /src/integrations/open_ai_sdk.py
-2. I also am expected to integrate ElasticSearch for all these operations (create, list, delete, index, search....) so additionaly provide all code pertaining to ElasticSearch vector db as well
+Now, go through the above code repository and the CURL examples for a few API routers thoroughly, and analyze them like a professional software developer. Below are the requirements:
+1. Make the Vector Index–related APIs compatible with the OpenAI Vector Store/Vector Store File APIs, as described in the doc reference below. This involves ensuring that the payload for the following endpoints follows the OpenAI API schema:
+ • v1/api/collection  
+ • vi/api/collection/data  
+ • vi/api/collection/create  
+ • vi/api/collection/delete  
+ • vi/api/index  
+ • vi/api/search  
+ • vi/api/delete_index  
+ • vi/api/collection/delete_by_ids  
+ • vi/api/rag  
+ 
+ For your reference, please see the "OpenAI Vector Store API Doc Reference" provided below, which includes details regarding both Vector Stores and Vector Store Files.
+ In order to perform this task responsibly, use your analytics to best match each of these existing endpoints to its corresponding API schema in OpenAI’s documentation. To assist your       understanding, provide a table mapping the project’s endpoints to the OpenAI Vector Store/Files API endpoints.
 
-I am attaching OpenAI Vector Stores and Vector Store Files doc api reference below for your better understanding 
+ Note:
+  – Follow best coding standards.
+  – Assess if we can create an SDK for OpenAI Vector Stores or Vector Store Files (something similar to /src/integrations/open_ai_sdk.py).
 
-------OpenAI Vector Store API Doc Reference------
-URL - https://platform.openai.com/docs/api-reference/vector-stores
+2. Integrate ElasticSearch for all these operations (create, list, delete, index, search, etc.). Please provide all code pertaining to the ElasticSearch vector database integration as well.
 
-Content:
+──────────────────────────────────────
+OpenAI Vector Store API Doc Reference:
+──────────────────────────────────────
+<<Web URL>> - https://platform.openai.com/docs/api-reference/vector-stores
+
+<<Content>>
 Vector stores
 Vector stores power semantic search for the Retrieval API and the file_search tool in the Responses and Assistants APIs.
 
@@ -8103,10 +8121,15 @@ OBJECT The vector store file object
   }
 }
 
--------------------------------------------------
+──────────────────────────────
+Answer Format Requirement:
+──────────────────────────────
+1. First, list all tasks and sub-tasks as descriptions that could be used in a JIRA task. The descriptions should be outlining the changes but not overly verbose.
 
-Now understand carefully how i want you to answer
-- First list all the tasks, sub-task that can mentioned as description in jira task, not too brief and not too much in detail.
-- Second take the requirement one at a time and list all the files that need changes or needed to created and then give the updated code of each file with updated segment highligthed, new file codes with locations and description describing why it was done.
+2. Next, address the requirements one at a time:
+  a. List all the files that need changes or need to be created.
+  b. For each file, provide the updated code with the newly added or modified code segments clearly highlighted.
+  c. Include any new files you create along with their locations.
+  d. For each change or new file, add a description detailing why the change was made.
 
-Be as detailed as possible with your response. I want the complete code so think properly and carefully analysing each and every aspect mentioned. Architect the solution properly
+Please be as detailed as possible in your response. I expect complete code files that are thoroughly thought through and properly architected according to the requirements.
