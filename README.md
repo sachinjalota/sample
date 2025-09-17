@@ -1,6 +1,6 @@
-──────────────────────────────
+---------------------------
 Complete Project Structure:
-──────────────────────────────
+---------------------------
 genai_platform_services/
     Dockerfile
     init.sh
@@ -6658,9 +6658,9 @@ def detect_document_type(url: str) -> str:
     else:
         raise HTTPException(status_code=404, detail="Document type not supported. Please upload only pdf/jpeg/jpg/png")
 
-───────────────────────────────────
+-----------------------------------
 Sample CURL Requests and Responses:
-───────────────────────────────────
+-----------------------------------
 
 1. curl --location --request POST 'https://genai-core-uat.hdfcbankuat.com/UAT/platform-service/v1/api/collection/create' \
 --header 'x-session-id: 1234' \
@@ -6981,12 +6981,12 @@ Response - curl --location --request DELETE 'https://genai-core-uat.hdfcbankuat.
     "collection": "Sachin_Test"
 }'
 
-──────────────────────────────
+------------------
 Task Instructions:
-──────────────────────────────
+------------------
 
 Now, go through the above code repository and the CURL examples for a few API routers thoroughly, and analyze them like a professional software developer. Below are the requirements:
-1. Make the Vector Index–related APIs compatible with the OpenAI Vector Store/Vector Store File APIs, as described in the doc reference below. This involves ensuring that the payload for the following endpoints follows the OpenAI API schema:
+1. Make the Vector Index–related APIs compatible with the OpenAI Vector Store/Vector Store File APIs, as described in the doc reference below. This doesn't mean you copy exactly what is mentioned in reference below (or uses the same packages and functions), rather structure the existing APIs similar to OpenAI ones. This involves ensuring that the payload for the following endpoints follows the OpenAI API schema, uses same same methodology, flows, functions, response format as OpenAI (you can create your own classes and implement it from scratch) but basic fucntionality should remain as it's already there w.r.t PGVector, just transform the existing to follow OpenAI structure:
  • v1/api/collection  
  • vi/api/collection/data  
  • vi/api/collection/create  
@@ -7006,9 +7006,9 @@ Now, go through the above code repository and the CURL examples for a few API ro
 
 2. Integrate ElasticSearch for all these operations (create, list, delete, index, search, etc.). Please provide all code pertaining to the ElasticSearch vector database integration as well.
 
-──────────────────────────────────────
+--------------------------------------
 OpenAI Vector Store API Doc Reference:
-──────────────────────────────────────
+--------------------------------------
 <<Web URL>> - https://platform.openai.com/docs/api-reference/vector-stores
 
 <<Content>>
@@ -8121,9 +8121,9 @@ OBJECT The vector store file object
   }
 }
 
-──────────────────────────────
+--------------------------
 Answer Format Requirement:
-──────────────────────────────
+--------------------------
 1. First, list all tasks and sub-tasks as descriptions that could be used in a JIRA task. The descriptions should be outlining the changes but not overly verbose.
 
 2. Next, address the requirements one at a time:
