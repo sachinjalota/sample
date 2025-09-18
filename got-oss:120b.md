@@ -1,3 +1,26 @@
+class CreateVectorStoreFileRequest(BaseModel):
+    file_id: str
+    attributes: Optional[Dict[str, Any]] = None
+    chunking_strategy: Optional[ChunkingStrategy] = None
+
+class VectorStoreFileObject(BaseModel):
+    id: str
+    object: Literal["vector_store.file"] = "vector_store.file"
+    created_at: int
+    vector_store_id: str
+    status: str
+    usage_bytes: Optional[int] = None
+    last_error: Optional[Dict[str, Any]] = None
+    attributes: Optional[Dict[str, Any]] = None
+    chunking_strategy: Optional[Dict[str, Any]] = None
+
+class ListVectorStoreFilesResponse(BaseModel):
+    object: Literal["list"] = "list"
+    data: List[VectorStoreFileObject]
+    first_id: Optional[str] = None
+    last_id: Optional[str] = None
+    has_more: bool
+
 ## src/services/pgvector_document_store.py
 
 # --------------------------------------------------------------
