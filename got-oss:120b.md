@@ -1,25 +1,35 @@
 class CreateVectorStoreFileRequest(BaseModel):
-    file_id: str
-    attributes: Optional[Dict[str, Any]] = None
-    chunking_strategy: Optional[ChunkingStrategy] = None
+    """Request to add a file to vector store."""
+    file_id: str = Field(..., description="ID of file to add to vector store")
+    attributes: Optional[Dict[str, Any]] = Field(None, description="File attributes")
+    chunking_strategy: Optional[ChunkingStrategy] = Field(None, description="File-specific chunking strategy")
 
-class VectorStoreFileObject(BaseModel):
-    id: str
-    object: Literal["vector_store.file"] = "vector_store.file"
-    created_at: int
-    vector_store_id: str
-    status: str
-    usage_bytes: Optional[int] = None
-    last_error: Optional[Dict[str, Any]] = None
-    attributes: Optional[Dict[str, Any]] = None
-    chunking_strategy: Optional[Dict[str, Any]] = None
+class VectorStoreModel(BaseModel):
+    """Vector store object model."""
+    id: str = Field(..., description="Vector store identifier")
+    object: str = Field("vector_store", description="Object type")
+    created_at: int = Field(..., description="Unix timestamp of creation")
+    name: Optional[str] = Field(None, description="Vector store name")
+    usage_bytes: int = Field(0, description="Total bytes used by files")
+    file_counts: FileCountsModel = Field(..., description="File processing counts")
+    status: VectorStoreStatus = Field(..., description="Processing status")
+    expires_after: Optional[ExpirationPolicy] = Field(None, description="Expiration policy")
+    expires_at: Optional[int] = Field(None, description="Unix timestamp when store expires")
+    last_active_at: Optional[int] = Field(None, description="Unix timestamp of last activity")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
 
-class ListVectorStoreFilesResponse(BaseModel):
-    object: Literal["list"] = "list"
-    data: List[VectorStoreFileObject]
-    first_id: Optional[str] = None
-    last_id: Optional[str] = None
-    has_more: bool
+class VectorStoreFileModel(BaseModel):
+    """Vector store file object model."""
+    id: str = Field(..., description="File identifier")
+    object: str = Field("vector_store.file", description="Object type")
+    usage_bytes: int = Field(..., description="Bytes used by this file")
+    created_at: int = Field(..., description="Unix timestamp of creation")
+    vector_store_id: str = Field(..., description="ID of containing vector store")
+    status: FileStatus = Field(..., description="File processing status")
+    last_error: Optional[VectorStoreFileError] = Field(None, description="Last processing error")
+    attributes: Optional[Dict[str, Any]] = Field(None, description="File attributes")
+    chunking_strategy: Optional[ChunkingStrategy] = Field(None, description="Chunking strategy used")
+
 
 ## src/services/pgvector_document_store.py
 
