@@ -2,11 +2,21 @@
 Complete Project Structure:
 ---------------------------
 genai_platform_services/
+    uv.lock
+    Taskfile.yaml
     Dockerfile
     init.sh
     pyproject.toml
+    database_schema.png
+    .env.test
+    .makeenv
     README.md
+    ci_check.sh
+    .gitignore
+    Flow_Diagram.png
     .env
+    .python-version
+    .ruff.toml
     resources/
         sql/
             ddl.sql
@@ -19,12 +29,14 @@ genai_platform_services/
             test_config.py
             test_logging_config.py
             repository/
+                test_vectorstore_ddl.py
                 __init__.py
                 registry/
                     __init__.py
                     test_pgvector.py
             models/
                 test_chat_models.py
+                test_vector_store_payload.py
                 __init__.py
                 test_header_information.py
                 test_upload_object_payload.py
@@ -48,13 +60,19 @@ genai_platform_services/
                     test_embedding_router.py
                     test_collection_router.py
                     test_file_processing_router.py
+                    test_vector_store_files_router.py
+                    test_vector_store_router.py
+                    test_pdf_extraction_router.py
+                    test_file_upload_router.py
                     test_speech_to_text_router.py
+                    test_file_chunking_router.py
                     internal/
                         test_chatcompletion_router.py
                         __init__.py
                         test_document_qna_router.py
                         test_export_traces.py
                         test_file_processing_router.py
+                        test_playground_chatcomplition_router.py
                         test_upload_file_router.py
                         test_playground_router.py
                     v2/
@@ -65,14 +83,20 @@ genai_platform_services/
                 __init__.py
             services/
                 test_vertexai_conversation_service.py
+                test_vectorstore_service.py
                 test_file_upload_service.py
                 test_rag_service.py
+                test_text_chunking_service.py
                 test_pgvector_document_store.py
                 test_pdf_processing_service.py
                 __init__.py
                 test_playground_chat_completion_service.py
+                test_pgvector_vector_store.py
+                test_pdf_extraction_service.py
             utility/
+                test_vector_store_helpers.py
                 test_utils.py
+                test_vector_store_utils.py
                 test_dynamic_model.py
                 test_registry_initializer.py
                 test_guardrails.py
@@ -90,6 +114,7 @@ genai_platform_services/
             __init__.py
             document_base_model.py
             collection_ddl.py
+            vectorstore_ddl.py
             registry/
                 database.py
                 __init__.py
@@ -113,6 +138,8 @@ genai_platform_services/
             completion_payload.py
             create_table_payload.py
             generate_qna_payload.py
+            vector_store_payload.py
+            completion_payload_internal.py
             headers.py
             search_request.py
             rag_payload.py
@@ -138,30 +165,19 @@ genai_platform_services/
             routers/
                 collection_router.py
                 speech_to_text_router.py
+                file_upload_router.py
+                pdf_extraction_router.py
                 file_processing_router.py
+                vector_store_files_router.py
+                file_chunking_router.py
                 document_store_router.py
                 __init__.py
                 genai_model_router.py
+                vector_store_router.py
                 text_to_speech_router.py
                 embeddings_router.py
                 rag_router.py
                 chatcompletion_router.py
-                internal/
-                    speech_to_text_router.py
-                    playground_chatcompletion_router.py
-                    file_processing_router.py
-                    document_qna_router.py
-                    upload_file_router.py
-                    playground_router.py
-                    __init__.py
-                    generate_qna_router.py
-                    genai_model_router.py
-                    text_to_speech_router.py
-                    export_traces_router.py
-                    chatcompletion_router.py
-                v2/
-                    __init__.py
-                    document_store_router_v2.py
         exception/
             __init__.py
             scanner_exceptions.py
@@ -171,36 +187,38 @@ genai_platform_services/
         client/
             opik_client.py
         services/
+            pdf_extraction_service.py
             pgvector_document_store.py
             embedding_model_service.py
             abstract_document_store.py
             rag_service.py
             file_upload_service.py
+            vectorstore_service.py
             genai_model_service.py
             __init__.py
             embedding_service.py
+            pgvector_vector_store.py
             collection_service.py
             vertexai_conversation_service.py
             speech_services.py
             playground_chat_completion_service.py
             tokenizer_service.py
+            text_chunking_service.py
             pdf_processing_service.py
         utility/
-            collection_utils.py
             registry.py
             __init__.py
-            collection_helpers.py
             registry_initializer.py
             utils.py
             guardrails.py
+            vector_store_helpers.py
             dynamic_model_utils.py
             file_io.py
             pdf_helpers.py
             url_utils.py
-
+            vector_store_utils.py
 Reading files inside 'src' folder:
-
->> /genai_platform_services/src/config.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/config.py
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -213,7 +231,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     allowed_origins: str = "https://10.216.70.62,http://localhost:3000,http://localhost:8000"
     allow_credentials: bool = True
-    allow_methods: str = "GET,POST,OPTIONS,DELETE"
+    allow_methods: str = "GET,POST,OPTIONS,DELETE,PUT"
     allow_headers: str = "Authorization,Content-Type,Accept,Origin,User-Agent,X-Requested-With,X-API-Key,X-Session-Id,X-Usecase-Id,X-Correlation-ID,x-base-api-key,token"
     # database
     database_url: str
@@ -248,8 +266,6 @@ class Settings(BaseSettings):
     default_model: str = "gemini-1.5-flash"
     default_model_embeddings: str = "BAAI/bge-m3"
 
-    embeddings_local_model_dir: str = "/app/tokenizers"
-
     # llm endpoint
     base_api_url: str = "https://10.216.70.62/DEV/litellm"
     api_key_verification_endpoint: str = "/key/info"
@@ -264,14 +280,19 @@ class Settings(BaseSettings):
     log_path: str = str(Path(__file__).parents[1] / "log" / "app.log")
     service_slug: str = "platform-service"
     validate_user_token_api: str = "https://10.216.70.62/DEV/prompthub-service/get-user-by-token"
-    # completion endpoint
-    completion_endpoint: str = "/text_completion"
-    image_completion_endpoint: str = "/image_completion"
+
     playground_endpoints: str = "/playground"
     chatcompletion_endpoint: str = "/chatcompletion"
 
     # embedding endpoint
     embedding_endpoint: str = "/embeddings"
+
+    vector_stores: str = "/vector_stores"
+    timezone: str = "Asia/Kolkata"
+
+    pdf_extraction: str = "/extract_pdf_content"
+    file_upload: str = "/file_upload"
+    chunk_text: str = "/chunk_text"
 
     # embedding endpoint
     search_endpoint: str = "/search"
@@ -294,11 +315,11 @@ class Settings(BaseSettings):
 
     vertexai_max_output_tokens: int = 65535
     vertexai_project: str = "hbl-dev-gcp-gen-ai-prj-spk-5a"
-    vertexai_model: str = "gemini-2.5-flash-preview-05-20"
+    vertexai_model: str = "gemini-2.5-flash"
     vertexai_temperature: int = 0
     vertexai_top_p: int = 1
     vertexai_seed: int = 0
-    vertexai_location: str = "global"
+    vertexai_location: str = "asia-south1"
 
     # opik traces endpoints
     opik_traces: str = "/opik_traces"
@@ -339,22 +360,24 @@ class Settings(BaseSettings):
 
     # playground text chatcompletion
     playground_chatcompletion_endpoint: str = "/playground/chatcompletion"
+    playground_user_history_endpoint: str = "/playground/user_history"
+    playground_user_history_by_id_endpoint: str = "/playground/user_history_by_id"
+    playground_update_chat_title_endpoint: str = "/playground/update_chat_title"
+    playground_delete_history_by_ids_endpoint: str = "/playground/delete_history_by_ids"
+    playground_delete_all_chat_history_endpoint: str = "/playground/delete_all_chat_history"
 
     litellm_model_info_endpoint: str = "https://10.216.70.62/DEV/litellm/model/info"
-    litellm_model_mode: str = "chat"
     list_genai_model: str = "/genai/models"
 
     # guardrails specifics
     guardrails_endpoint: str = "https://10.216.70.62/DEV/guardrails/"
-    guardrails_ssl_verify: bool = False
     guardrails_prompt_analyze_api: str = "api/v1/analyze/prompt"
     guardrails_output_analyze_api: str = "api/v1/analyze/output"
 
     guardrails_prompt_analyze_internal_api: str = "api/v1/internal/analyze/prompt"
     guardrails_output_analyze_internal_api: str = "api/v1/internal/analyze/output"
-    guardrails_timeout: int = 300
 
-    default_api_key: str
+    default_litellm_api_key: str
     # redis
     redis_host: str = "localhost"
     redis_port: int = 6378
@@ -376,7 +399,6 @@ class Settings(BaseSettings):
     prompt_hub_get_prompt_api: str = "/extenal/get-prompt-by-name"
     prompt_hub_get_prompt_api_internal: str = "/client/prompt/get-prompt-by-name"
     prompt_hub_get_usecase_by_apikey: str = "/extenal/get-usecase-by-api-key"
-    promt_hub_get_usecase_by_token: str = "/client/usecase/"
     # max retries for rpm and tpm on lite llm
     max_retries: int = 0
 
@@ -429,7 +451,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     return Settings()
 
->> /genai_platform_services/src/logging_config.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/logging_config.py
 import logging
 import sys
 from pathlib import Path
@@ -495,7 +517,9 @@ class Logger:
         logger = cls.create_logger(logger_name) if logger_name else cls._get_default_logger()
         logger.critical(message)
 
->> /genai_platform_services/src/main.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/main.py
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Awaitable, Callable, List
 
@@ -507,14 +531,21 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.responses import JSONResponse
 
 from src.api.deps import get_rate_limiter
-from src.api.routers import (  # speech_to_text_router,; text_to_speech_router,
+from src.api.routers import (
     chatcompletion_router,
     collection_router,
     document_store_router,
     embeddings_router,
+    file_chunking_router,
     file_processing_router,
+    file_upload_router,
     genai_model_router,
+    pdf_extraction_router,
     rag_router,
+    speech_to_text_router,
+    text_to_speech_router,
+    vector_store_files_router,
+    vector_store_router,
 )
 from src.api.routers.internal import (
     chatcompletion_router as internal_chatcompletion_router,
@@ -529,7 +560,7 @@ from src.api.routers.internal import (
     text_to_speech_router as internal_text_to_speech_router,
     upload_file_router,
 )
-# from src.api.routers.v2 import document_store_router_v2
+from src.api.routers.v2 import document_store_router_v2
 from src.config import get_settings
 from src.db.connection import initialize_platform_db
 from src.exception.document_store_exception import DocumentStoreError
@@ -718,15 +749,47 @@ def create_app(version: str = "0.1.0") -> FastAPI:
         prefix=settings.api_common_prefix,
         tags=["COMPLETION"],
     )
+
+    app.include_router(
+        genai_model_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["GENAI_CHAT_MODELS"],
+    )
+
     app.include_router(
         embeddings_router.router,
         prefix=settings.api_common_prefix,
         tags=["EMBEDDING"],
     )
+
+    app.include_router(
+        file_upload_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["FILE_UPLOAD"],
+    )
+
+    app.include_router(
+        pdf_extraction_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["PDF_FILE_EXTRACTION"],
+    )
+
+    app.include_router(
+        file_chunking_router.router,
+        prefix=settings.api_common_prefix,
+        tags=["CHUNK_TEXT"],
+    )
+
+    app.include_router(vector_store_router.router, prefix=settings.api_common_prefix, tags=["VECTOR_STORE"])
+
+    app.include_router(vector_store_files_router.router, prefix=settings.api_common_prefix, tags=["VECTOR_STORE_FILE"])
+
+    app.include_router(collection_router.router, prefix=settings.api_common_prefix, tags=["COLLECTION"])
+
     app.include_router(
         document_store_router.router,
         prefix=settings.api_common_prefix,
-        tags=["INDEXING_AND_SEARCH"],
+        tags=["INDEXING_DELETE_SEARCH"],
     )
 
     app.include_router(
@@ -736,27 +799,22 @@ def create_app(version: str = "0.1.0") -> FastAPI:
     )
 
     app.include_router(
+        document_store_router_v2.router,
+        prefix=settings.api_common_prefix,
+        tags=["CREATE_INDEXING_SEARCH_V2"],
+    )
+
+    app.include_router(
         file_processing_router.router,
         prefix=settings.api_common_prefix,
         tags=["FILE_PROCESSING"],
     )
-
-    # app.include_router(
-    #     document_store_router_v2.router,
-    #     prefix=settings.api_common_prefix,
-    #     tags=["CREATE_INDEXING_SEARCH_V2"],
-    # )
-
-    # app.include_router(speech_to_text_router.router, prefix=settings.api_common_prefix, tags=["SPEECH_TO_TEXT"])
-    #
-    # app.include_router(text_to_speech_router.router, prefix=settings.api_common_prefix, tags=["TEXT_TO_SPEECH"])
 
     app.include_router(
         document_qna_router.router,
         prefix=f"{settings.api_common_prefix}/{settings.internal_api_url}",
         tags=["INTERNAL"],
     )
-
     app.include_router(
         upload_file_router.router,
         prefix=f"{settings.api_common_prefix}/{settings.internal_api_url}",
@@ -782,25 +840,21 @@ def create_app(version: str = "0.1.0") -> FastAPI:
         prefix=f"{settings.api_common_prefix}/{settings.internal_api_url}",
         tags=["INTERNAL"],
     )
-
     app.include_router(
         export_traces_router.router,
         prefix=f"{settings.api_common_prefix}/{settings.internal_api_url}",
         tags=["INTERNAL"],
     )
-
     app.include_router(
         playground_chatcompletion_router.router,
         prefix=f"{settings.api_common_prefix}/{settings.internal_api_url}",
         tags=["INTERNAL"],
     )
-
     app.include_router(
         internal_speech_to_text_router.router,
         prefix=f"{settings.api_common_prefix}/{settings.internal_api_url}",
         tags=["INTERNAL"],
     )
-
     app.include_router(
         internal_text_to_speech_router.router,
         prefix=f"{settings.api_common_prefix}/{settings.internal_api_url}",
@@ -812,25 +866,21 @@ def create_app(version: str = "0.1.0") -> FastAPI:
         tags=["INTERNAL"],
     )
 
+    app.include_router(speech_to_text_router.router, prefix=settings.api_common_prefix, tags=["SPEECH_TO_TEXT"])
+
+    app.include_router(text_to_speech_router.router, prefix=settings.api_common_prefix, tags=["TEXT_TO_SPEECH"])
+
     app.include_router(stt_ws_router, prefix=settings.ws_common_prefix)
 
     app.include_router(tts_ws_router, prefix=settings.ws_common_prefix)
-
-    app.include_router(collection_router.router, prefix=settings.api_common_prefix, tags=["COLLECTION"])
-
-    app.include_router(
-        genai_model_router.router,
-        prefix=settings.api_common_prefix,
-        tags=["GENAI_CHAT_MODELS"],
-    )
 
     return app
 
 
 app = create_app()
 
->> /genai_platform_services/src/repository/document_repository.py
-from typing import Dict, Type, TypeAlias
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/document_repository.py
+from typing import Any, Dict, Type, TypeAlias
 
 from sqlalchemy import Index, cast, delete, inspect, text
 from sqlalchemy.dialects.postgresql import array
@@ -842,6 +892,10 @@ from src.db.connection import create_session, engine
 from src.exception.exceptions import DatabaseConnectionError
 from src.logging_config import Logger
 from src.models.storage_payload import SearchResult
+from src.models.vector_store_payload import (
+    ContentBlock,
+    SearchResult as SearchResult_V2,
+)
 from src.repository.document_base_model import BaseModelOps, DocumentBase
 
 logger = Logger.create_logger(__name__)
@@ -863,7 +917,13 @@ class DocumentRepository:
         self.fields_to_include = [
             c.name
             for c in self.document_table.__table__.columns
-            if (c.name != "embedding" and c.name != "search_vector")
+            if c.name not in {"file_id", "file_name", "embedding", "search_vector"}
+        ]
+
+        self.fields_to_include_vs = [
+            c.name
+            for c in self.document_table.__table__.columns
+            if c.name not in {"file_id", "file_name", "content", "embedding", "search_vector"}
         ]
 
     def get_document_model(self) -> Type[DocumentBase]:
@@ -944,7 +1004,7 @@ class DocumentRepository:
         include_topics: list | None = None,
         top_k: int = settings.default_document_limit,
         min_relevance_score: float = settings.min_relevance_score,
-    ) -> list[SearchResult]:
+    ) -> tuple[list[SearchResult], list[SearchResult_V2]]:
         if not self.check_table_exists():
             raise DatabaseConnectionError(f"Collection '{self.table_name}' does not exist in the database.")
         with create_session() as session:
@@ -957,6 +1017,9 @@ class DocumentRepository:
             query = self.apply_common_filter(include_links, include_topics, query, search_terms)  # type: ignore
             query = query.filter(rank >= min_relevance_score)  # type: ignore
             results = query.order_by(rank.desc()).limit(top_k).all()  # type: ignore
+
+            # TODO - Need to remove this when settling down to OpenAI kind of API
+
             output = [
                 SearchResult(
                     id=str(record[0].id),
@@ -965,7 +1028,18 @@ class DocumentRepository:
                 )
                 for record in results
             ]
-        return output
+            # As per OpenAI Vector Store
+            output_v2 = [
+                SearchResult_V2(
+                    file_id=str(record[0].file_id) or "",
+                    filename=str(record[0].file_name) or "",
+                    score=round(record[1], 4),
+                    content=[ContentBlock(type="text", text=str(record[0].content))],
+                    attributes=self._extra_attributes(record[0]),
+                )
+                for record in results
+            ]
+        return output, output_v2
 
     def sematic_search(
         self,
@@ -975,7 +1049,7 @@ class DocumentRepository:
         include_topics: list | None = None,
         top_k: int = settings.default_document_limit,
         min_similarity_score: float = settings.min_similarity_score,
-    ) -> list[SearchResult]:
+    ) -> tuple[list[SearchResult], list[SearchResult_V2]]:
         if not self.check_table_exists():
             raise DatabaseConnectionError(f"Collection '{self.table_name}' does not exist in the database.")
         max_distance = 1 - min_similarity_score
@@ -988,6 +1062,8 @@ class DocumentRepository:
             query = self.apply_common_filter(include_links, include_topics, query, search_terms)  # type: ignore
             query = query.filter(cosine_distance <= max_distance)
             results = query.order_by(cosine_distance).limit(top_k).all()
+            for record in results:
+                print(self._extra_attributes(record[0]))
             output = [
                 SearchResult(
                     id=str(record[0].id),
@@ -996,7 +1072,17 @@ class DocumentRepository:
                 )
                 for record in results
             ]
-        return output
+            output_v2 = [
+                SearchResult_V2(
+                    file_id=str(record[0].file_id) or "",
+                    filename=str(record[0].file_name) or "",
+                    score=round(1 - record[1], 4),
+                    content=[ContentBlock(type="text", text=str(record[0].content))],
+                    attributes=self._extra_attributes(record[0]),
+                )
+                for record in results
+            ]
+        return output, output_v2
 
     def apply_common_filter(self, include_links, include_topics, query, search_terms):  # type: ignore
         if include_links:
@@ -1019,27 +1105,64 @@ class DocumentRepository:
             source={field: getattr(record, field) for field in self.fields_to_include},
         )
 
+    def _extra_attributes(self, record: DocumentBase) -> Dict[str, Any]:
+        return {field: getattr(record, field) for field in self.fields_to_include_vs}
+
     @staticmethod
-    def insert_documents(table_name: str, documents: list[dict]) -> None:
-        insert_sql = f"""
+    def insert_documents(
+        table_name: str,
+        documents: list[dict],
+        service_type: str = "collection",
+        file_id: str | None = None,
+        file_name: str | None = None,
+    ) -> None:
+        if service_type == "collection":
+            insert_sql = f"""
+                INSERT INTO "{table_name}" (
+                    embedding, content, links, topics, author, meta_data, search_vector
+                ) VALUES (:embedding, :content, :links, :topics, :author, :meta_data,to_tsvector('english', :content) )
+            """
+            for doc in documents:
+                with create_session() as session:
+                    session.execute(
+                        text(insert_sql),
+                        {
+                            "embedding": doc[
+                                "embedding"
+                            ],  # assuming it's in pgvector acceptable format (list of floats)
+                            "content": doc["content"],
+                            "links": doc.get("links"),
+                            "topics": doc.get("topics"),
+                            "author": doc.get("author"),
+                            "meta_data": doc.get("meta_data"),
+                        },
+                    )
+        else:
+            insert_sql = f"""
             INSERT INTO "{table_name}" (
-                embedding, content, links, topics, author, meta_data, search_vector
-            ) VALUES (:embedding, :content, :links, :topics, :author, :meta_data,to_tsvector('english', :content) )
-        """
-        for doc in documents:
-            with create_session() as session:
-                session.execute(
-                    text(insert_sql),
-                    {
-                        "embedding": doc["embedding"],  # assuming it's in pgvector acceptable format (list of floats)
-                        "content": doc["content"],
-                        "links": doc.get("links"),
-                        "topics": doc.get("topics"),
-                        "author": doc.get("author"),
-                        "meta_data": doc.get("meta_data"),
-                    },
-                )
->> /genai_platform_services/src/repository/base_repository.py
+            file_id, file_name, embedding, content, links, topics, author, meta_data, search_vector
+            ) VALUES
+            (:file_id, :file_name, :embedding, :content, :links, :topics, :author,
+            :meta_data,to_tsvector('english', :content))
+            """
+            for doc in documents:
+                with create_session() as session:
+                    session.execute(
+                        text(insert_sql),
+                        {
+                            "file_id": file_id,
+                            "file_name": file_name,
+                            "embedding": doc["embedding"],  # assuming it's in pgvector acceptable format (list of
+                            # floats)
+                            "content": doc["content"],
+                            "links": doc.get("links"),
+                            "topics": doc.get("topics"),
+                            "author": doc.get("author"),
+                            "meta_data": doc.get("meta_data"),
+                        },
+                    )
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/base_repository.py
 from typing import Any, Dict, List, Optional, Sequence, Type, TypeVar, Union
 
 from sqlalchemy import MetaData, Table, delete, insert, select, update
@@ -1062,12 +1185,13 @@ class BaseRepository:
         return list(filters)
 
     @classmethod
-    def select_one(
+    def select_one(  # type: ignore
         cls,
         db_tbl: Type[T],
         filters: Optional[Union[Dict[str, Any], Sequence[Any]]] = None,
+        session_factory=create_session_platform,
     ) -> dict | None:
-        with create_session_platform() as session:
+        with session_factory() as session:
             stmt = select(db_tbl).where(*cls._build_filters(db_tbl, filters))
             result = session.execute(stmt).scalar_one_or_none()
             if result is None:
@@ -1076,54 +1200,81 @@ class BaseRepository:
         return response
 
     @classmethod
-    def select_many(
+    def select_many(  # type: ignore
         cls,
         db_tbl: Type[T],
         filters: Optional[Union[Dict[str, Any], Sequence[Any]]] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        order_by: Optional[Union[Any, Sequence[Any]]] = None,
+        session_factory=create_session_platform,
     ) -> List[T]:
-        with create_session_platform() as session:
+        with session_factory() as session:
             stmt = select(db_tbl).where(*cls._build_filters(db_tbl, filters))
+            if order_by is not None:
+                if isinstance(order_by, (list, tuple)):
+                    stmt = stmt.order_by(*order_by)
+                else:
+                    stmt = stmt.order_by(order_by)  # type: ignore
             if limit is not None:
                 stmt = stmt.limit(limit)
             if offset is not None:
                 stmt = stmt.offset(offset)
             response = session.execute(stmt).scalars().all()
+            columns = db_tbl.__table__.columns.keys()  # type: ignore
             data = []
             for record in response:
-                data.append(record.collection_name)  # type: ignore
+                row = {}
+                for col in columns:
+                    row[col] = getattr(record, col)
+                data.append(row)
         return data
 
     @classmethod
-    def insert_one(cls, db_tbl: Type[T], data: Dict[str, Any]) -> Any:
-        with create_session_platform() as session:
+    def insert_one(cls, db_tbl: Type[T], data: Dict[str, Any], session_factory=create_session_platform) -> Any:  # type: ignore
+        with session_factory() as session:
             stmt = insert(db_tbl).values(**data)
             result = session.execute(stmt)
             response = result.inserted_primary_key
         return response
 
     @classmethod
-    def update_many(
-        cls, db_tbl: Type[T], filters: Optional[Union[Dict[str, Any], Sequence[Any]]], data: Dict[str, Any]
-    ) -> int:
-        with create_session_platform() as session:
+    def update_many(  # type: ignore
+        cls,
+        db_tbl: Type[T],
+        filters: Optional[Union[Dict[str, Any], Sequence[Any]]],
+        data: Dict[str, Any],
+        session_factory=create_session_platform,
+    ) -> Any:
+        with session_factory() as session:
             stmt = update(db_tbl).where(*cls._build_filters(db_tbl, filters)).values(**data)
             result = session.execute(stmt)
             response = result.rowcount
+            session.commit()
         return response
 
     @classmethod
-    def delete(cls, db_tbl: Type[T], filters: Optional[Union[Dict[str, Any], Sequence[Any]]]) -> int:
-        with create_session_platform() as session:
+    def delete(  # type: ignore
+        cls,
+        db_tbl: Type[T],
+        filters: Optional[Union[Dict[str, Any], Sequence[Any]]],
+        session_factory=create_session_platform,
+    ) -> Any:
+        with session_factory() as session:
             stmt = delete(db_tbl).where(*cls._build_filters(db_tbl, filters))
             result = session.execute(stmt)
             response = result.rowcount
         return response
 
     @classmethod
-    def select_table_details(cls, table_name: str, limit: int = None, offset: int = None) -> List[Dict[str, Any]]:  # type: ignore
-        with create_session() as session:
+    def select_table_details(  # type: ignore
+        cls,
+        table_name: str,
+        limit: int | None = None,
+        offset: int | None = None,
+        session_factory=create_session,
+    ) -> List[Dict[str, Any]]:
+        with session_factory() as session:
             metadata = MetaData()
             table = Table(table_name, metadata, autoload_with=session.get_bind())
             stmt = select(table)
@@ -1135,33 +1286,20 @@ class BaseRepository:
             rows = [dict(row) for row in result]
             return rows
 
->> /genai_platform_services/src/repository/document_base_model.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/document_base_model.py
 import uuid
 from datetime import datetime
 from typing import Dict, TypeAlias
 
 from pgvector.sqlalchemy import VECTOR  # type: ignore
-from sqlalchemy import (
-    ARRAY,
-    JSON,
-    Column,
-    DateTime,
-    Index,
-    Integer,
-    MetaData,
-    String,
-    Text,
-    func,
-    literal_column,
-    text,
-)
+from sqlalchemy import ARRAY, JSON, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.config import get_settings
-from src.db.connection import engine
 from src.exception.exceptions import DatabaseConnectionError
 from src.logging_config import Logger
 
@@ -1174,20 +1312,21 @@ settings = get_settings()
 
 
 class DocumentBase(DeclarativeBase):
-    id: Mapped[UUID] = mapped_column(
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        unique=True,
         nullable=False,
     )
+    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     links: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     topics: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     author: Mapped[str | None] = mapped_column(String, nullable=True)
     meta_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    search_vector: Mapped[str] = mapped_column(TSVECTOR, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    search_vector: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True)
 
     @declared_attr  # type: ignore
     def __tablename__(cls) -> str:
@@ -1211,14 +1350,13 @@ class BaseModelOps:
         except Exception as e:
             raise DatabaseConnectionError(f"{str(e)}")
 
->> /genai_platform_services/src/repository/collection_ddl.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/collection_ddl.py
 from sqlalchemy import text
 
 from src.db.connection import create_session
 
 
 class CollectionDDL:
-
     @staticmethod
     def _get_index_name(table_name: str) -> str:
         return f"{table_name}_search_vector_index"
@@ -1236,9 +1374,12 @@ class CollectionDDL:
             topics _varchar NULL,
             author varchar NULL,
             meta_data jsonb NULL,
-            search_vector tsvector
+            search_vector tsvector,
+            file_id UUID NULL,
+            file_name VARCHAR(255) NULL
         );
         """
+        # TODO - Remove file_id, file_name when collections approach discontinues
 
         create_index_sql = f"""
         CREATE INDEX "{index_name}" ON public."{table_name}" USING GIN (search_vector);
@@ -1258,7 +1399,121 @@ class CollectionDDL:
             session.execute(text(drop_table_sql))
         return True
 
->> /genai_platform_services/src/repository/registry/database.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/vectorstore_ddl.py
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+
+from src.db.connection import create_session
+from src.exception.exceptions import VectorStoreCreationError
+
+
+class VectorStoreDDL:
+    @staticmethod
+    def _info_table_name(store_name: str) -> str:
+        return f"{store_name}_file_info"
+
+    @staticmethod
+    def _chunks_table_name(store_name: str) -> str:
+        return f"{store_name}_chunks"
+
+    @staticmethod
+    def _index_name(table_name: str) -> str:
+        return f"{table_name}_search_vector_index"
+
+    @staticmethod
+    def create_vectorstore_tables(tbl_name: str, dimensions: int) -> None:
+        info_tbl = VectorStoreDDL._info_table_name(tbl_name)
+        chunks_tbl = VectorStoreDDL._chunks_table_name(tbl_name)
+        index_name = VectorStoreDDL._index_name(chunks_tbl)
+
+        create_info_sql = f"""
+        CREATE TABLE public."{info_tbl}" (
+            vs_id UUID NOT NULL,
+            file_id UUID NOT NULL,
+            file_name VARCHAR(255) NOT NULL,
+            file_version int NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            last_error TEXT,
+            usage_bytes BIGINT NOT NULL DEFAULT 0,
+            chunking_strategy VARCHAR(255) NOT NULL,
+            metadata_vs JSONB,
+            attributes JSONB,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            status VARCHAR(32) NOT NULL,
+            CONSTRAINT "{info_tbl}_pkey" PRIMARY KEY (vs_id, file_id)
+        );
+        """
+
+        create_chunks_sql = f"""
+        CREATE TABLE public."{chunks_tbl}" (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            file_id UUID NOT NULL,
+            file_name VARCHAR(255) NOT NULL,
+            embedding vector({dimensions}) NOT NULL,
+            content TEXT NOT NULL,
+            links _varchar,
+            topics _varchar,
+            author VARCHAR,
+            meta_data JSONB,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            search_vector tsvector
+        );
+        """
+
+        create_index_sql = f"""
+        CREATE INDEX "{index_name}" ON public."{chunks_tbl}"
+        USING GIN (search_vector);
+        """
+
+        try:
+            with create_session() as session:
+                with session.begin():
+                    session.execute(text(create_info_sql))
+                    session.execute(text(create_chunks_sql))
+                    session.execute(text(create_index_sql))
+        except SQLAlchemyError as exc:
+            raise VectorStoreCreationError(f"Failed to create vector‑store tables for '{tbl_name}': {exc}") from exc
+
+    @staticmethod
+    def create_tables_and_index(table_name: str, dimensions: int) -> None:
+        return VectorStoreDDL.create_vectorstore_tables(
+            tbl_name=table_name,
+            dimensions=dimensions,
+        )
+
+    # @staticmethod
+    # def drop_table_and_index(tbl_name: str) -> bool:
+    #     info_tbl = VectorStoreDDL._info_table_name(tbl_name)
+    #     chunks_tbl = VectorStoreDDL._chunks_table_name(tbl_name)
+    #     index_name = VectorStoreDDL._index_name(chunks_tbl)
+    #     drop_index_sql = f"""DROP INDEX IF EXISTS public."{index_name}";"""
+    #     drop_table_sql = f"""DROP TABLE IF EXISTS public."{info_tbl}", public."{chunks_tbl}" CASCADE;"""
+    #     with create_session() as session:
+    #         session.execute(text(drop_index_sql))  # drop index first (optional, but safe)
+    #         session.execute(text(drop_table_sql))
+    #     return True
+
+    @staticmethod
+    def drop_table_and_index(tbl_name: str, session=None) -> bool:
+        info_tbl = VectorStoreDDL._info_table_name(tbl_name)
+        chunks_tbl = VectorStoreDDL._chunks_table_name(tbl_name)
+        index_name = VectorStoreDDL._index_name(chunks_tbl)
+
+        drop_index_sql = f"""DROP INDEX IF EXISTS public."{index_name}";"""
+        drop_table_sql = f"""DROP TABLE IF EXISTS public."{info_tbl}", public."{chunks_tbl}" CASCADE;"""
+
+        if session:
+            session.execute(text(drop_index_sql))
+            session.execute(text(drop_table_sql))
+        else:
+            # fallback if no session passed
+            with create_session() as new_session:
+                new_session.execute(text(drop_index_sql))
+                new_session.execute(text(drop_table_sql))
+
+        return True
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/registry/database.py
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 
@@ -1296,12 +1551,12 @@ class Database(ABC):
     async def bulk_insert(self, documents: List[type]) -> None:
         raise NotImplementedError("")
 
->> /genai_platform_services/src/repository/registry/__init__.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/registry/__init__.py
 from src.utility.registry import Registry
 
 storage_backend_registry = Registry()
 
->> /genai_platform_services/src/repository/registry/pgvector.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/repository/registry/pgvector.py
 from contextlib import contextmanager
 from typing import Any, List
 
@@ -1419,7 +1674,9 @@ def convert_list_to_json(obj_list: List[Base]) -> List[dict]:
     """Convert a list of SQLAlchemy model instances to list of dicts."""
     return [to_dict(obj) for obj in obj_list]
 
->> /genai_platform_services/src/chunkers/recursive_chunker.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/chunkers/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/chunkers/recursive_chunker.py
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PDFPlumberLoader
 from langchain_core.documents import Document
@@ -1442,7 +1699,7 @@ class RecursiveChunker:
         except Exception as e:
             raise PdfChunkingError(f"Chunking Error: {str(e)}")
 
->> /genai_platform_services/src/websockets/stt_websocket_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/websockets/stt_websocket_router.py
 import asyncio
 import ssl
 
@@ -1512,7 +1769,7 @@ async def speech_to_text_websocket(client_websocket: WebSocket) -> None:
         logger.error(f"Error in WebSocket communication setup: {e}")
         await client_websocket.close()
 
->> /genai_platform_services/src/websockets/tts_websocket_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/websockets/tts_websocket_router.py
 import asyncio
 import io
 import json
@@ -1640,7 +1897,7 @@ async def text_to_speech_websocket(client_websocket: WebSocket) -> None:
     except Exception as e:
         logger.error(f"Error in WebSocket communication: {e}")
 
->> /genai_platform_services/src/models/upload_object_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/upload_object_payload.py
 import base64
 from enum import Enum
 from typing import Optional
@@ -1714,7 +1971,7 @@ class UploadObjectPayload(BaseModel):
     def decode_file(self) -> bytes:
         return base64.b64decode(self.file_base64)
 
->> /genai_platform_services/src/models/document_qna.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/document_qna.py
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -1728,7 +1985,7 @@ class DocumentQNARequest(BaseModel):
 class DocumentQNAResponse(BaseModel):
     content: Optional[str] = Field(default="", description="Answer based on document")
 
->> /genai_platform_services/src/models/playground_chatcompletion_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/playground_chatcompletion_payload.py
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -1737,15 +1994,46 @@ from src.models.completion_payload import SupportedModels
 
 
 class PlaygroundRequest(BaseModel):
+    title: str = Field(..., description="Title of the chat ")
     document_urls: Optional[List[str]] = Field(None, description="Optional list of URLs to query (PDFs or images)")
     user_prompt: str = Field(..., description="The question to be answered based on the document content")
     model_name: SupportedModels = Field(..., description="model name")
+    chat_id: str = Field(..., description="chat id for the history")
+    user_id: str = Field(..., description="user id for the history")
 
 
 class PlaygroundResponse(BaseModel):
     content: Optional[str] = Field(default="", description="Answer based on document")
 
->> /genai_platform_services/src/models/collection_payload.py
+
+class PlaygroundUserHistoryRequest(BaseModel):
+    user_id: str = Field(..., description="user id for the history")
+    page: Optional[int] = Field(1, description="Optional page based on 1 indexing")
+    limit: Optional[int] = Field(10, description="Optional limit number of chat in response")
+
+
+class PlaygroundUserHistoryByIdRequest(BaseModel):
+    user_id: str = Field(..., description="user id for the history")
+    chat_id: str = Field(..., description="chat id for the history")
+    page: Optional[int] = Field(1, description="Optional page based on 1 indexing")
+    limit: Optional[int] = Field(10, description="Optional limit number of chat in response")
+
+
+class PlaygroundChatTitleUpdateRequest(BaseModel):
+    user_id: str = Field(..., description="user id for the history")
+    chat_id: str = Field(..., description="chat id for the history")
+    title: str = Field(..., description="Title of the chat ")
+
+
+class PlaygroundDeleteHistoryByIdRequest(BaseModel):
+    user_id: str = Field(..., description="user id for the history")
+    chat_ids: List[str] = Field(..., description="chat id for the history")
+
+
+class PlaygroundDeleteAllChatHistoryRequest(BaseModel):
+    user_id: str = Field(..., description="user id for the history")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/collection_payload.py
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -1775,7 +2063,7 @@ class DeleteCollection(BaseModel):
             raise ValueError("The 'collection' field must not be empty.")
         return v
 
->> /genai_platform_services/src/models/genai_model.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/genai_model.py
 from enum import Enum
 
 
@@ -1786,7 +2074,7 @@ class ModelTypeEnum(str, Enum):
     tts = "tts"
     vision = "vision"
 
->> /genai_platform_services/src/models/export_traces_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/export_traces_payload.py
 from pydantic import BaseModel, Field
 
 
@@ -1796,7 +2084,7 @@ class ExportTracesRequest(BaseModel):
     user_api_key_team_alias: str = Field("", description="User API key team alias")
     user_api_key_team_id: str = Field("", description="User API key team id")
 
->> /genai_platform_services/src/models/embeddings_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/embeddings_payload.py
 from typing import List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
@@ -1853,7 +2141,9 @@ class EmbeddingsRequest(BaseModel):
         None, description="Optional parameters to configure the model's behavior."
     )
 
->> /genai_platform_services/src/models/storage_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/storage_payload.py
 from enum import Enum
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -2017,7 +2307,7 @@ class DocumentSearchPayload(BaseModel):
         description="Whether to rank results (applies only to hybrid search).",
     )
 
->> /genai_platform_services/src/models/completion_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/completion_payload.py
 from enum import Enum
 from typing import Dict, List, Literal, Optional, TypeAlias, Union
 
@@ -2033,6 +2323,8 @@ settings = get_settings()
 class SupportedModels(str, Enum):
     GEMINI_FLASH_15 = "gemini-1.5-flash"
     GEMINI_PRO_15 = "gemini-1.5-pro"
+    GEMINI_FLASH_25_PREV = "gemini-2.5-flash-preview-05-20"
+    GEMINI_FLASH_25 = "gemini-2.5-flash"
 
 
 class Content(BaseModel):
@@ -2145,7 +2437,7 @@ class ChatCompletionRequest(BaseModel):
     prompt_name: Optional[str] = Field(default=None, description="Optional Unique identifier for the system prompt.")
     guardrail_id: Optional[str] = Field(
         default=None,
-        description="Optional guardrail ID to validate the prompt or response against specific rules.",
+        description="Optional Guardrail ID to validate the prompt or response against specific rules.",
     )
     user_prompt: Union[str, List[Messages]] = Field(
         ...,
@@ -2191,14 +2483,7 @@ class ChatPrompt(ChatCompletionRequest):
         description="Optional guardrail ID to validate the prompt or response against specific rules.",
     )
 
-
-class ChatCompletionRequestInternal(ChatCompletionRequest):
-    usecase_id: int = Field(
-        ...,
-        description="Usecase ID to fetch the prompt or default guardrail id using valid token.",
-    )
-
->> /genai_platform_services/src/models/create_table_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/create_table_payload.py
 from typing import Any, Dict
 
 from pydantic import BaseModel, Field
@@ -2219,7 +2504,7 @@ class CreateDocumentCollectionPayload(BaseModel):
     collection: str = Field(..., description="Name of the storage collection.")
     dynamic_fields: Dict[str, Dict[str, Any]] = Field(..., description="A dictionary of dynamic field definitions.")
 
->> /genai_platform_services/src/models/generate_qna_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/generate_qna_payload.py
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -2245,9 +2530,7 @@ class ModelConfig(BaseModel):
 
 class QnaCompletionPayload(BaseModel):
     prompt_name: Optional[str] = Field(..., description="Prompt for Q&A Generation")
-    guardrail_id: Optional[str] = Field(
-        None, description="Guardrail Id to be used for input and output prompt scanning"
-    )
+    guardrail_id: str = Field(..., description="Guardrail Id to be used for input and output prompt scanning")
     model_name: str = Field(default="gemini-1.5-flash", description="Seed value for deterministic results.")
     object_path: str = Field(..., description="the upload object path on storage")
     mime_type: str = Field(default="application/pdf", description="mime type like application/pdf")
@@ -2260,7 +2543,283 @@ class QnaCompletionPayload(BaseModel):
         description="Configuration for sampling behavior for model.",
     )
 
->> /genai_platform_services/src/models/headers.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/vector_store_payload.py
+from enum import Enum
+from typing import Annotated, Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, Field, conlist, field_validator
+
+
+class StorageBackend(str, Enum):
+    PGVECTOR = "pgvector"
+    ELASTICSEARCH = "elasticsearch"
+
+
+class StaticChunkingStrategy(BaseModel):
+    type: str = Field("static", description="Always 'static'")
+    max_chunk_size_tokens: int = Field(..., ge=100, le=4096, description="Maximum tokens per chunk")
+    chunk_overlap_tokens: int = Field(..., ge=0, le=2048, description="Tokens that overlap between chunks")
+
+
+class AutoChunkingStrategy(BaseModel):
+    type: str = Field("auto", description="Always 'auto'")
+
+
+ChunkingStrategy = Union[AutoChunkingStrategy, StaticChunkingStrategy]
+
+
+class ExpirationPolicy(BaseModel):
+    anchor: str = Field("last_active_at", description="Timestamp anchor for expiration")
+    days: int = Field(..., ge=0, description="Days after anchor when vector store expires")
+
+
+class CreateVectorStoreRequest(BaseModel):
+    name: str = Field(..., description="Name of the vector store")
+    embedding_model: str = Field("BAAI/bge-m3", description="Embedding model name")
+    storage_backend: StorageBackend = Field(
+        StorageBackend.PGVECTOR,
+        description="Specifies the storage backend to use (e.g., PGVector, "
+        "ElasticSearch. Currently, only PGVector is supported.",
+    )
+    metadata: Optional[Dict[str, str]] = Field(
+        None,
+        description="Additional metadata; set of 16 key-value pair; keys "
+        "max length 64 characters, values max length 512 "
+        "characters",
+    )
+    file_ids: Optional[List[str]] = Field(None, description="List of the file IDs to include")
+    chunking_strategy: Optional[ChunkingStrategy] = Field(
+        default_factory=lambda: AutoChunkingStrategy(), description="Chunking strategy - defaults to auto if omitted"
+    )
+    expires_after: Optional[ExpirationPolicy] = Field(
+        default_factory=lambda: ExpirationPolicy(days=365),
+        description="Expiration Policy - defaults to 1 year is omitted",
+    )
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(cls, value: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+        if value is None:
+            return value
+
+        # Check dictionary size
+        if len(value) > 16:
+            raise ValueError("metadata dictionary can have at most 16 key-value pairs.")
+
+        # Check key and value lengths
+        for key, val in value.items():
+            if not isinstance(key, str) or len(key) > 64:
+                raise ValueError("metadata keys must be strings with max length 64 characters.")
+            if not isinstance(val, str) or len(val) > 512:
+                raise ValueError("metadata values must be strings with max length 512 characters.")
+
+        return value
+
+
+class VectorStoreStatus(str, Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    FAILED = "failed"
+
+
+class FileCountsModel(BaseModel):
+    in_progress: int = Field(0)
+    completed: int = Field(0)
+    failed: int = Field(0)
+    cancelled: int = Field(0)
+    total: int = Field(0)
+
+
+class VectorStoreErrorDetails(BaseModel):
+    code: str = Field(..., description="Error code: server_error or rate_limit_exceeded")
+    message: str = Field(..., description="Error details")
+
+
+class CreateVectorStoreResponse(BaseModel):
+    id: str = Field(..., description="Vector store identifier")
+    object: str = Field("vector_store", description="Object type")
+    created_at: int = Field(..., description="Unix timestamp of creation")
+    name: str = Field(..., description="Vector store name")
+    usage_bytes: int = Field(0, description="Total bytes used by files")
+    file_counts: FileCountsModel = Field(..., description="File processing counts")
+    status: VectorStoreStatus = Field(..., description="Processing status")
+    expires_after: Optional[ExpirationPolicy] = Field(None, description="Expiration policy")
+    expires_at: Optional[int] = Field(None, description="Unix timestamp when store expires")
+    last_active_at: Optional[int] = Field(None, description="Unix timestamp of last activity")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+    last_error: Optional[VectorStoreErrorDetails] = Field(None, description="Last processing error")
+
+
+class Document(BaseModel):
+    content: str = Field(..., description="The main textual content of the document.")
+    links: Optional[List[str]] = Field(
+        default=None, description="A URL or reference links associated with the document."
+    )
+    author: Optional[str] = Field(default=None, description="Name of the document's author or creator.")
+    topics: Optional[List[str]] = Field(default=None, description="A list of topics that the document covers.")
+    metadata: Annotated[
+        Optional[dict], Field(default_factory=dict, description="Optional metadata like tags, file meta data etc.")
+    ]
+
+
+class CreateVectorStoreFileRequest(BaseModel):
+    storage_backend: StorageBackend = Field(
+        StorageBackend.PGVECTOR,
+        description="Specifies the storage backend to use (e.g., PGVector, "
+        "ElasticSearch. Currently, only PGVector is supported.",
+    )
+    file_id: str = Field(..., description="ID of file to add to vector store")
+    file_name: str = Field(..., description="Name of file to add to vector store")
+    file_contents: conlist(Document, min_length=1) = Field(  # type: ignore
+        ..., description="A non-empty list of documents to be stored."
+    )
+    attributes: Optional[Dict[str, Any]] = Field(None, description="File attributes")
+    chunking_strategy: Optional[ChunkingStrategy] = Field(
+        default_factory=lambda: AutoChunkingStrategy(), description="Chunking strategy - defaults to auto if omitted"
+    )
+
+
+class FileStatus(str, Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class CreateVectorStoreFileResponse(BaseModel):
+    id: Optional[str] = Field(None, description="File identifier")
+    object: str = Field("vector_store.file", description="Object type")
+    usage_bytes: int = Field(0, description="Bytes used by this file")
+    created_at: int = Field(..., description="Unix timestamp of creation")
+    vector_store_id: str = Field(..., description="ID of containing vector store")
+    status: FileStatus = Field(..., description="File processing status")
+    last_error: Optional[VectorStoreErrorDetails] = Field(None, description="Last processing error")
+    attributes: Optional[Dict[str, Any]] = Field(None, description="File attributes")
+    chunking_strategy: Optional[ChunkingStrategy] = Field(
+        default_factory=lambda: AutoChunkingStrategy(), description="Chunking strategy - defaults to auto if omitted"
+    )
+
+
+class ListVectorStoresResponse(BaseModel):
+    object: str = Field("list", description="Object type")
+    data: List[CreateVectorStoreResponse] = Field(..., description="List of objects")
+    first_id: Optional[str] = Field(None, description="ID of first object")
+    last_id: Optional[str] = Field(None, description="ID of last object")
+    has_more: bool = Field(False, description="Whether more objects available")
+
+
+class DeleteVectorStoreResponse(BaseModel):
+    id: str = Field(..., description="")
+    object: str = Field(..., description="")
+    deleted: bool = Field(..., description="")
+
+
+class DeleteVectorStoreFileResponse(BaseModel):
+    id: str = Field(..., description="")
+    object: str = Field(..., description="")
+    deleted: bool = Field(..., description="")
+
+
+class ContentItem(BaseModel):
+    type: str = Field(..., description="Type of content, e.g., 'text', 'embedding', etc.")
+    text: str = Field(..., description="The actual content text or embedding vector.")
+
+
+class AttributesItem(BaseModel):
+    key: str = Field(..., description="Metadata key.")
+    value: str = Field(..., description="Value of the metadata.")
+
+
+class RetrieveFileResponse(BaseModel):
+    file_id: str = Field(..., description="Unique identifier for the file.")
+    filename: Optional[str] = Field(None, description="Name of the file.")
+    attributes: List[AttributesItem] = Field(..., description="Metadata attributes for the file.")
+    content: List[ContentItem] = Field(..., description="List of content segments within the file.")
+
+
+class SearchType(str, Enum):
+    SEMANTIC = "semantic"
+    FULL_TEXT = "full_text"
+    HYBRID = "hybrid"
+
+
+class ComparisonFilter(BaseModel):
+    key: str = Field(..., description="Attribute key to compare")
+    type: str = Field(..., description="Comparison operator: eq, ne, gt, gte, lt, lte")
+    value: Union[str, int, float, bool] = Field(..., description="Value to compare against")
+
+
+class CompoundFilter(BaseModel):
+    type: str = Field(..., description="Logic operator: and, or")
+    filters: List[Union["ComparisonFilter", "CompoundFilter"]] = Field(..., description="Filters to combine")
+
+
+# Forward reference resolution
+CompoundFilter.model_rebuild()
+
+SearchFilter = Union[ComparisonFilter, CompoundFilter]
+
+
+class RankingOptions(BaseModel):
+    ranker: str = Field("auto", description="Ranker type: auto or none")
+    score_threshold: float = Field(0.0, description="Minimum score threshold")
+
+
+class SearchVectorStoreRequest(BaseModel):
+    query: Union[str, List[str]] = Field(..., description="Search query string or strings")
+    search_type: SearchType = Field(..., description="Type of search: semantic, full_text, or hybrid.")
+    storage_backend: StorageBackend = Field(
+        StorageBackend.PGVECTOR,
+        description="Specifies the storage backend to use (e.g., PGVector, ElasticSearch). Currently, only PGVector "
+        "is supported.",
+    )
+    filters: Optional[SearchFilter] = Field(None, description="Attribute-based filters")
+    max_num_results: int = Field(10, ge=1, le=50, description="Maximum results to return")
+    ranking_options: Optional[RankingOptions] = Field(None, description="Ranking configuration")
+    rewrite_query: bool = Field(False, description="Whether to rewrite query for vector search")
+
+
+class ContentBlock(BaseModel):
+    type: str = Field("text", description="Content type")
+    text: str = Field(..., description="Text content")
+
+
+class SearchResult(BaseModel):
+    file_id: str = Field(..., description="ID of source file")
+    filename: Optional[str] = Field(None, description="Original filename")
+    score: float = Field(..., description="Relevance score")
+    attributes: Optional[Dict[str, Any]] = Field(None, description="File attributes")
+    content: List[ContentBlock] = Field(..., description="Content blocks")
+
+
+class SearchVectorStoreResponse(BaseModel):
+    object: str = Field("vector_store.search_results.page", description="Object type")
+    search_query: str = Field(..., description="Original search query")
+    data: List[SearchResult] = Field(..., description="Search results")
+    has_more: bool = Field(False, description="Whether more results available")
+    next_page: Optional[str] = Field(None, description="Next page cursor")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/completion_payload_internal.py
+from typing import Literal, Optional, TypeAlias
+
+from pydantic import Field
+
+from src.config import get_settings
+from src.models.completion_payload import ChatCompletionRequest
+
+ChatCompletionModality: TypeAlias = Literal["text", "audio"]
+
+settings = get_settings()
+
+
+class ChatCompletionRequestInternal(ChatCompletionRequest):
+    usecase_id: Optional[int] = Field(
+        default=None,
+        description="Usecase ID to fetch the prompt using valid token.",
+    )
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/headers.py
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -2280,7 +2839,7 @@ class InternalHeaderInformation(BaseModel):
     class Config:
         frozen = True
 
->> /genai_platform_services/src/models/search_request.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/search_request.py
 from enum import Enum
 from typing import Annotated, List, Optional
 
@@ -2349,7 +2908,7 @@ class Document(BaseModel):
         Optional[dict], Field(default_factory=dict, description="Optional metadata like tags, file meta data etc.")
     ]
 
->> /genai_platform_services/src/models/rag_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/rag_payload.py
 from typing import Optional
 
 from openai.types.chat.chat_completion import ChatCompletion
@@ -2364,7 +2923,7 @@ settings = get_settings()
 
 class RAGRequest(BaseModel):
     guardrail_id: Optional[str] = Field(
-        default=None,
+        ...,
         description="Optional guardrail ID to validate the prompt or response against specific rules.",
     )
     system_prompt: str = Field(
@@ -2430,7 +2989,7 @@ class RAGResponse(BaseModel):
         ..., description="List of relevant source documents or passages used to generate the LLM response."
     )
 
->> /genai_platform_services/src/models/registry_metadata.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/registry_metadata.py
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
@@ -2447,7 +3006,7 @@ class RegistryMetadata(Base):
     schema_definition = Column(JSONB, nullable=False)
     storage_backend = Column(String, nullable=False)
 
->> /genai_platform_services/src/models/tts_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/tts_payload.py
 from enum import Enum
 from typing import Dict
 
@@ -2489,7 +3048,7 @@ class TTSRequest(BaseModel):
     class Config:
         use_enum_values = True
 
->> /genai_platform_services/src/models/indexing_payload.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/models/indexing_payload.py
 from typing import List
 
 from pydantic import BaseModel, Field, conlist, field_validator
@@ -2528,7 +3087,7 @@ class DocumentIndexingPayload(BaseModel):
     documents: List[dict] = Field(..., description="A list of documents to stored.")
     embedding_map: dict = Field(..., description="content column and embedding column mapping")
 
->> /genai_platform_services/src/integrations/cloud_storage.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/integrations/cloud_storage.py
 from datetime import datetime, timezone
 from typing import BinaryIO, List
 
@@ -2630,7 +3189,7 @@ class CloudStorage:
                 self.logger.error(f"Error moving files in {self.cloud_provider.upper()}: {str(e)}")
             raise
 
->> /genai_platform_services/src/integrations/open_ai_sdk.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/integrations/open_ai_sdk.py
 import base64
 from typing import Any, Dict, List
 
@@ -2683,9 +3242,6 @@ class OpenAISdk:
 
                 if request.guardrail_id:
                     scan_args["guardrail_id"] = request.guardrail_id
-
-                if getattr(request, "usecase_id", None):
-                    scan_args["usecase_id"] = request.usecase_id  # type: ignore
 
                 result = await scan_prompt(**scan_args)  # type: ignore
                 if not result.get("is_valid", False):
@@ -2790,9 +3346,6 @@ class OpenAISdk:
             if request.guardrail_id:
                 scan_args["guardrail_id"] = request.guardrail_id
 
-            if getattr(request, "usecase_id", None):
-                scan_args["usecase_id"] = request.usecase_id  # type: ignore
-
             result = await scan_output(**scan_args)  # type: ignore
 
             logger.info(
@@ -2824,10 +3377,12 @@ class OpenAISdk:
             input=user_input,
         )
 
->> /genai_platform_services/src/integrations/redis_chatbot_memory.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/integrations/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/integrations/redis_chatbot_memory.py
 import json
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, cast
 
 import redis
 
@@ -2908,14 +3463,138 @@ class RedisShortTermMemory:
         if not self.redis.exists(session_key):
             return []
         memory_json = self.redis.hget(session_key, "memory")
-
         return json.loads(memory_json) if memory_json else []  # type: ignore
+
+    def get_user_chat_key(self, user_id: str, chat_id: str) -> str:
+        return f"chat:{user_id}:{chat_id}"
+
+    def store_user_chat_history(self, user_id: str, chat_id: str, messages: list[dict], title: str = "") -> None:
+        IST = timezone(timedelta(hours=5, minutes=30))
+        for msg in messages:
+            if "timestamp" not in msg:
+                msg["timestamp"] = datetime.now(IST).isoformat()
+        key = self.get_user_chat_key(user_id, chat_id)
+        messages.sort(key=lambda m: m["timestamp"], reverse=True)
+        data = {"title": title, "timestamp": datetime.now(IST).isoformat(), "messages": messages}
+        self.redis.set(name=key, value=json.dumps(data), ex=604800)
+
+    def get_relevant_user_chat_memory(self, user_id: str, chat_id: str) -> dict:
+        key = self.get_user_chat_key(user_id, chat_id)
+
+        if not self.redis.exists(key):
+            return {"title": "", "messages": []}
+
+        memory_raw = self.redis.get(key)
+        if isinstance(memory_raw, bytes):
+            memory_raw = memory_raw.decode("utf-8")
+        if isinstance(memory_raw, str):
+            try:
+                data = json.loads(memory_raw)
+                if isinstance(data, dict):
+                    return {"title": data.get("title", ""), "messages": data.get("messages", [])}
+                if isinstance(data, list):
+                    return {"title": "", "messages": data}
+            except Exception:
+                pass
+        return {"title": "", "messages": []}
+
+    def get_all_user_chat_summaries(self, user_id: str, page: int = 1, limit: int = 10) -> List[Dict[str, str]]:
+        pattern = f"chat:{user_id}:*"
+        keys = cast(List[bytes], self.redis.keys(pattern))
+        chat_list: List[Dict[str, str]] = []
+
+        for key in keys:
+            try:
+                key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+                chat_id = key_str.split(":")[2]
+                memory_json = self.redis.get(key)
+                if memory_json is None:
+                    continue
+                if isinstance(memory_json, bytes):
+                    memory_json = memory_json.decode("utf-8")
+                if not isinstance(memory_json, (str, bytes, bytearray)):
+                    continue
+                data = json.loads(memory_json)
+                chat_list.append(
+                    {"chat_id": chat_id, "title": data.get("title", ""), "timestamp": data.get("timestamp", "")}
+                )
+            except Exception:
+                continue
+
+        chat_list.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+        # Pagination
+        start = (page - 1) * limit
+        end = start + limit
+        return chat_list[start:end]
+
+    def get_chat_history_by_id(self, user_id: str, chat_id: str, page: int = 1, limit: int = 10) -> Dict[str, Any]:
+        key = self.get_user_chat_key(user_id, chat_id)
+        memory_json = self.redis.get(key)
+        if memory_json is None:
+            return {}
+
+        if isinstance(memory_json, bytes):
+            memory_json = memory_json.decode("utf-8")
+
+        if not isinstance(memory_json, (str, bytes, bytearray)):
+            return {}
+
+        data = json.loads(memory_json)
+        title = data.get("title", "")
+        timestamp = data.get("timestamp", "")
+        messages = data.get("messages", [])
+
+        # Pagination on messages
+        start = (page - 1) * limit
+        end = start + limit
+
+        return {
+            "chat_id": chat_id,
+            "title": title,
+            "timestamp": timestamp,
+            "messages": messages[start:end],
+        }
+
+    def update_chat_title(self, user_id: str, chat_id: str, new_title: str) -> bool:
+        key = self.get_user_chat_key(user_id, chat_id)
+        if not self.redis.exists(key):
+            return False
+
+        memory_json = self.redis.get(key)
+        if isinstance(memory_json, bytes):
+            memory_json = memory_json.decode("utf-8")
+
+        if not isinstance(memory_json, (str, bytes, bytearray)):
+            return False
+
+        try:
+            data = json.loads(memory_json)
+            data["title"] = new_title
+            self.redis.set(name=key, value=json.dumps(data), ex=604800)
+            return True
+        except Exception:
+            return False
+
+    def delete_chat_by_chatid(self, user_id: str, chat_id: str) -> bool:
+        key = self.get_user_chat_key(user_id, chat_id)
+        if self.redis.exists(key):
+            self.redis.delete(key)
+            return True
+        return False
+
+    def delete_all_chats_for_user(self, user_id: str) -> int:
+        pattern = f"chat:{user_id}:*"
+        keys = cast(List[bytes], self.redis.keys(pattern))
+        if not keys:
+            return 0
+        return cast(int, self.redis.delete(*keys))
 
 
 def pop_from_last(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return messages[2:]
 
->> /genai_platform_services/src/prompts/__init__.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/prompts/__init__.py
 from .default_prompts import (
     DEFAULT_RAG_SYSTEM_PROMPT,
     DEFAULT_SYSTEM_PROMPT,
@@ -2924,7 +3603,7 @@ from .default_prompts import (
 
 __all__ = ["DEFAULT_SYSTEM_PROMPT", "DEFAULT_RAG_SYSTEM_PROMPT", "PLAYGROUND_SYSTEM_PROMPT"]
 
->> /genai_platform_services/src/prompts/default_prompts.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/prompts/default_prompts.py
 DEFAULT_SYSTEM_PROMPT = """
 
 You are an advanced AI assistant, designed to provide accurate, concise, and well-structured responses. Follow these guidelines:
@@ -3085,8 +3764,14 @@ Always begin each interaction with care, and maintain a high standard of accurac
 
 
 """
->> /genai_platform_services/src/db/platform_meta_tables.py
-from sqlalchemy import Column, Integer, String
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/db/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/db/platform_meta_tables.py
+import uuid
+
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.sql import func
 
 from src.db.base import BaseDBA
 
@@ -3098,14 +3783,30 @@ class CollectionInfo(BaseDBA):
     model_name = Column(String, nullable=False)
 
 
+class VectorStoreInfo(BaseDBA):
+    __tablename__ = "vectorstore_info"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False)
+    usecase_id = Column(String(100), nullable=False)
+    model_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+    last_active_at = Column(DateTime(timezone=False))
+    usage_bytes = Column(BigInteger, nullable=False, server_default="0")
+    metadata_vs = Column(JSONB)
+    expires_after = Column(JSONB)
+    expires_at = Column(DateTime(timezone=False))
+    file_counts = Column(JSONB)
+    is_active = Column(Boolean, nullable=False, server_default="true")
+
+
 class EmbeddingModels(BaseDBA):
     __tablename__ = "embedding_models"
     model_name = Column(String(255), nullable=False, primary_key=True)
     dimensions = Column(Integer, nullable=False)
-    context_length: int = Column(Integer, nullable=False)
+    context_length: int = Column(Integer, nullable=False)  # type: ignore
     model_path = Column(String, nullable=False)
-
->> /genai_platform_services/src/db/connection.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/db/connection.py
 from contextlib import contextmanager
 from typing import Any, Generator
 
@@ -3181,14 +3882,14 @@ def initialize_platform_db() -> None:
         logger.error(f"Error initializing Platform Meta Tables: {str(e)}")
 
 
->> /genai_platform_services/src/db/base.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/db/base.py
 from sqlalchemy.orm import DeclarativeBase
 
 
 class BaseDBA(DeclarativeBase):
     pass
 
->> /genai_platform_services/src/api/deps.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/deps.py
 from functools import lru_cache
 from typing import Optional
 
@@ -3211,10 +3912,10 @@ from src.services.collection_service import CollectionService
 from src.services.embedding_model_service import EmbeddingsModelService
 from src.services.embedding_service import EmbeddingService
 from src.services.file_upload_service import FileUploadService
+from src.services.genai_model_service import GenAIModelsService
 from src.services.speech_services import SpeechService
 from src.services.vertexai_conversation_service import VertexAIConversationService
 from src.utility.file_io import FileIO
-from src.services.genai_model_service import GenAIModelsService
 
 settings = get_settings()
 
@@ -3237,7 +3938,7 @@ async def validate_headers_and_api_key(
     missing_headers = []
     if not session_id:
         # missing_headers.append("x-session-id")
-        logger.info('Missing x-session-id')
+        logger.info("Missing x-session-id")
     if not x_base_api_key:
         missing_headers.append("x-base-api-key")
 
@@ -3273,7 +3974,7 @@ def build_openai_sdk(api_key: str) -> OpenAISdk:
 
 @lru_cache()
 def get_openai_service_internal() -> OpenAISdk:
-    return build_openai_sdk(settings.default_api_key)
+    return build_openai_sdk(settings.default_litellm_api_key)
 
 
 @lru_cache()
@@ -3374,7 +4075,9 @@ def get_speech_service(file_io_service: FileIO = Depends(get_file_io_service)) -
 def get_genai_model_service() -> GenAIModelsService:
     return GenAIModelsService()
 
->> /genai_platform_services/src/api/routers/collection_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/collection_router.py
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from starlette.responses import JSONResponse
 
@@ -3389,11 +4092,11 @@ from src.logging_config import Logger
 from src.models.collection_payload import CreateCollection, DeleteCollection
 from src.models.headers import HeaderInformation
 from src.services.collection_service import CollectionService
-from src.utility.collection_helpers import (
+from src.utility.vector_store_helpers import (
     get_usecase_id_by_api_key,
-    validate_collection_access,
+    validate_store_access,
 )
-from src.utility.collection_utils import is_valid_collection_name
+from src.utility.vector_store_utils import is_valid_name
 
 router = APIRouter()
 logger = Logger.create_logger(__name__)
@@ -3432,7 +4135,7 @@ async def get_collection_data(  # type: ignore
     collection_service: CollectionService = Depends(get_collection_service),
 ) -> dict:
     try:
-        is_valid, error_message = is_valid_collection_name(collection)
+        is_valid, error_message = is_valid_name(collection)
         if is_valid:
             return await collection_service.get_details(collection=collection, limit=limit, offset=offset)
     except ConnectionError as e:
@@ -3453,7 +4156,7 @@ async def create_collection(
     collection_service: CollectionService = Depends(get_collection_service),
 ) -> JSONResponse:
     try:
-        is_valid, error_message = is_valid_collection_name(request.collection)
+        is_valid, error_message = is_valid_name(request.collection)
         if is_valid:
             usecase_id = await get_usecase_id_by_api_key(header_information.x_base_api_key)
             response = await collection_service.create(request=request, usecase_id=usecase_id)
@@ -3480,7 +4183,7 @@ async def delete_collection(
     collection_service: CollectionService = Depends(get_collection_service),
 ) -> dict:
     try:
-        await validate_collection_access(header_information.x_base_api_key, request.collection)
+        await validate_store_access(header_information.x_base_api_key, request.collection)
         return collection_service.delete(request.collection)
     except HTTPException as e:
         raise e
@@ -3492,7 +4195,7 @@ async def delete_collection(
         logger.exception("Error deleting collection.")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
->> /genai_platform_services/src/api/routers/speech_to_text_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/speech_to_text_router.py
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import JSONResponse
 from starlette import status
@@ -3531,7 +4234,163 @@ async def speech_to_text(
         logger.error(f"Error during transcription: {e}", exc_info=True)
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"error": str(e)})
 
->> /genai_platform_services/src/api/routers/file_processing_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/file_upload_router.py
+import os
+import shutil
+import tempfile
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import JSONResponse
+
+from src import config
+from src.api.deps import validate_headers_and_api_key
+from src.integrations.cloud_storage import CloudStorage
+from src.logging_config import Logger
+from src.models.headers import HeaderInformation
+from src.services.pdf_extraction_service import PDFExtractionService
+
+router = APIRouter()
+logger = Logger.create_logger(__name__)
+settings = config.get_settings()
+
+
+@router.post(
+    f"{settings.file_upload}",
+    summary="Upload PDF files (optionally extract their contents).",
+    description=(
+        "Uploads PDF files to GCS. If `extract=true` is passed as query param, "
+        "the router also extracts their text and returns both file paths and content."
+    ),
+    response_description="Uploaded file info, optionally with extracted content.",
+    status_code=status.HTTP_200_OK,
+)
+async def upload_files(
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    files: List[UploadFile] = File(...),
+    extract: Optional[bool] = Query(default=False, description="Extract PDF content after upload"),
+) -> JSONResponse:
+    logger.info(f"Upload request (extract={extract}) from {header_information.x_session_id}")
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided for upload.")
+
+    cloud_service = CloudStorage()
+    temp_dir = tempfile.mkdtemp()
+    uploaded_gs_paths = []
+    failed_files = []
+
+    try:
+        for file in files:
+            try:
+                if not file.filename:
+                    continue
+
+                if file.content_type != "application/pdf":
+                    failed_files.append({"file": file.filename, "error": "Invalid MIME type"})
+                    continue
+
+                local_path = os.path.join(temp_dir, file.filename)
+                with open(local_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+
+                with open(local_path, "rb") as binary_file:
+                    gs_uri = cloud_service.upload_object(
+                        binary_file,
+                        bucket_name=settings.upload_bucket_name,
+                        object_name=f"vector_store_files/{file.filename}",
+                    )
+                    uploaded_gs_paths.append(gs_uri)
+
+            except Exception as e:
+                logger.exception(f"Error uploading {file.filename}: {e}")
+                failed_files.append({"file": file.filename, "error": str(e)})  # type: ignore
+
+        if not uploaded_gs_paths and failed_files:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to upload all files: {failed_files}",
+            )
+
+        response_data = {"uploaded_files": uploaded_gs_paths, "failed_files": failed_files}
+
+        if extract and uploaded_gs_paths:
+            try:
+                extraction_service = PDFExtractionService()  # type: ignore
+                extraction_results = extraction_service.extract_from_gcs(uploaded_gs_paths)
+                response_data["extraction_results"] = extraction_results
+            except Exception as e:
+                logger.exception(f"Extraction failed after upload: {e}")
+                response_data["extraction_error"] = str(e)
+
+        return JSONResponse(content=response_data, status_code=status.HTTP_200_OK)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected upload failure: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}",
+        )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/pdf_extraction_router.py
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
+
+from src import config
+from src.api.deps import validate_headers_and_api_key
+from src.logging_config import Logger
+from src.models.headers import HeaderInformation
+from src.services.pdf_extraction_service import PDFExtractionService
+
+router = APIRouter()
+logger = Logger.create_logger(__name__)
+settings = config.get_settings()
+
+
+@router.post(
+    settings.pdf_extraction,
+    summary="Extract text from PDFs stored in GCS.",
+    description="Accepts a list of 'gs://' file paths and extracts their text content.",
+    response_description="List of extracted text per file.",
+    status_code=status.HTTP_200_OK,
+)
+async def extract_pdf_content(
+    file_paths: List[str],
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+) -> JSONResponse:
+    logger.info(f"Extraction request for {len(file_paths)} file(s) by {header_information.x_session_id}")
+
+    try:
+        service = PDFExtractionService()  # type: ignore
+        results = service.extract_from_gcs(file_paths)
+
+        # Check if all failed
+        all_failed = all("error" in r for r in results)
+        if all_failed:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="All file extractions failed. Check logs for details.",
+            )
+
+        return JSONResponse(content={"results": results}, status_code=status.HTTP_200_OK)
+
+    except HTTPException as e:
+        logger.warning(f"Extraction failed with {e.detail}")
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected error during extraction: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error during extraction: {str(e)}",
+        )
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/file_processing_router.py
 import os
 import shutil
 import tempfile
@@ -3589,7 +4448,234 @@ async def file_processing(
     logger.info(f"stored_files processed: {gs_files}")
     return JSONResponse(content={"stored_files": gs_files}, status_code=status.HTTP_200_OK)
 
->> /genai_platform_services/src/api/routers/document_store_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/vector_store_files_router.py
+from typing import Literal
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from src.api.deps import get_openai_service, validate_headers_and_api_key
+from src.config import get_settings
+from src.db.platform_meta_tables import VectorStoreInfo
+from src.exception.document_store_exception import UnsupportedStorageBackendError
+from src.exception.exceptions import DatabaseConnectionError
+from src.integrations.open_ai_sdk import OpenAISdk
+from src.logging_config import Logger
+from src.models.headers import HeaderInformation
+from src.models.vector_store_payload import (
+    CreateVectorStoreFileRequest,
+    CreateVectorStoreFileResponse,
+    DeleteVectorStoreFileResponse,
+    RetrieveFileResponse,
+    StorageBackend,
+)
+from src.repository.base_repository import BaseRepository
+from src.repository.document_repository import DocumentRepository
+from src.services.embedding_service import EmbeddingService
+from src.services.pgvector_vector_store import PGVectorVectorStore
+from src.utility.vector_store_helpers import (
+    check_embedding_model,
+    get_usecase_id_by_api_key,
+    validate_store_access,
+)
+
+router = APIRouter()
+logger = Logger.create_logger(__name__)
+settings = get_settings()
+
+
+@router.post(
+    f"{settings.vector_stores}/{{store_id}}/files",
+    response_model=CreateVectorStoreFileResponse,
+    summary="Indexes documents/contents of a file into the specified vector store",
+    description=(
+        "Accepts a batch of file contents (documents) and processes them for embedding generation and storage. "
+        "Currently supports PGVector as the storage backend. Embeddings are generated using the provided "
+        "OpenAI-compatible model and stored in the specified collection. "
+        "Requires valid API key headers for authentication."
+    ),
+    status_code=status.HTTP_200_OK,
+)
+# @opik.track
+async def create_vector_store_files(
+    store_id: str,
+    request: CreateVectorStoreFileRequest,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    open_ai_sdk: OpenAISdk = Depends(get_openai_service),
+) -> CreateVectorStoreFileResponse:
+    try:
+        model_name = await validate_store_access(
+            api_key=header_information.x_base_api_key, vector_store=store_id, service_type="vectorstore"
+        )
+        model_path, embedding_dimensions, context_length = await check_embedding_model(model_name=model_name)
+        logger.info(
+            f"Indexing request from {header_information.x_session_id} for vector store: {store_id} and file "
+            f"count: {len(request.file_contents)} for model_name: {model_name} "
+        )
+        if request.storage_backend.lower() == StorageBackend.PGVECTOR.value:
+            embedding_service = EmbeddingService(open_ai_sdk)
+            row_data = BaseRepository.select_one(db_tbl=VectorStoreInfo, filters={"id": store_id})  # type: ignore
+            if row_data:
+                store_name = row_data["name"]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=f"Vector store with Id '{store_id}' not found."
+                )
+            document_repository = DocumentRepository(f"{store_name}_chunks", embedding_dimensions=embedding_dimensions)
+            if document_repository.check_table_exists():
+                pgvector_vector_storage = PGVectorVectorStore(
+                    embedding_service=embedding_service,
+                    document_repository=document_repository,
+                )
+
+                return await pgvector_vector_storage.create_store_file(
+                    request, store_id, store_name, model_name, context_length, model_path, embedding_dimensions
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Vector Store '{store_name}' with Id '{store_id}' does not exist",
+                )
+        else:
+            raise UnsupportedStorageBackendError(f"Unsupported storage backend: {request.storage_backend}")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.delete(
+    f"{settings.vector_stores}/{{vector_store_id}}/files/{{file_id}}",
+    summary="Deletes a vector store file (a single document) from vector store and its metadata",
+    status_code=status.HTTP_200_OK,
+)
+async def delete_vector_store_file(
+    vector_store_id: str,
+    file_id: str,
+    storage_backend: Literal["pgvector", "elasticsearch"] = Query("pgvector"),
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    open_ai_sdk: OpenAISdk = Depends(get_openai_service),
+) -> DeleteVectorStoreFileResponse:
+    if storage_backend.lower() == StorageBackend.PGVECTOR.value:
+        try:
+            embedding_service = EmbeddingService(open_ai_sdk)
+            document_repository = DocumentRepository(vector_store_id, embedding_dimensions=0)
+            pgvector_vector_file_storage = PGVectorVectorStore(
+                embedding_service=embedding_service,
+                document_repository=document_repository,
+            )
+            usecase_id = await get_usecase_id_by_api_key(header_information.x_base_api_key)
+            return await pgvector_vector_file_storage.delete_by_id(vector_store_id, file_id, usecase_id)  # type: ignore
+        except HTTPException as e:
+            raise e
+        except ConnectionError:
+            raise
+        except DatabaseConnectionError:
+            raise
+        except Exception as e:
+            logger.exception("Error deleting collection.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    else:
+        raise UnsupportedStorageBackendError(f"Unsupported storage backend: {storage_backend}")
+
+
+@router.get(
+    f"{settings.vector_stores}/{{vector_store_id}}/files/{{file_id}}/content",
+    summary="Retrieves a vector store file (a single document) and its metadata",
+    status_code=status.HTTP_200_OK,
+)
+async def retrieve_vector_store_file(
+    vector_store_id: str,
+    file_id: str,
+    storage_backend: Literal["pgvector", "elasticsearch"] = Query("pgvector"),
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    open_ai_sdk: OpenAISdk = Depends(get_openai_service),
+) -> RetrieveFileResponse:
+    if storage_backend.lower() == StorageBackend.PGVECTOR.value:
+        try:
+            embedding_service = EmbeddingService(open_ai_sdk)
+            document_repository = DocumentRepository(vector_store_id, embedding_dimensions=0)
+            pgvector_vector_file_storage = PGVectorVectorStore(
+                embedding_service=embedding_service,
+                document_repository=document_repository,
+            )
+            usecase_id = await get_usecase_id_by_api_key(header_information.x_base_api_key)
+            return await pgvector_vector_file_storage.retrieve_by_id(vector_store_id, file_id, usecase_id)
+
+        except HTTPException as e:
+            raise e
+        except ConnectionError:
+            raise
+        except DatabaseConnectionError:
+            raise
+        except Exception as e:
+            logger.exception("Error retrieving vector store file.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    else:
+        raise UnsupportedStorageBackendError(f"Unsupported storage backend: {storage_backend}")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/file_chunking_router.py
+from typing import List, Literal, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from src import config
+from src.api.deps import validate_headers_and_api_key
+from src.logging_config import Logger
+from src.models.headers import HeaderInformation
+from src.services.text_chunking_service import TextChunker
+
+router = APIRouter()
+logger = Logger.create_logger(__name__)
+settings = config.get_settings()
+
+
+# --- Request model ---
+class ChunkTextRequest(BaseModel):
+    input_text: str
+    criteria: Literal["recursive", "fixed"] = "fixed"
+    chunk_size: int = 500
+    overlap: int = 50
+    separators: Optional[List[str]] = ["\n\n", ". ", " "]
+
+
+@router.post(
+    settings.chunk_text,
+    summary="Chunk the provided text",
+    description="Splits input text into chunks using 'recursive' or 'fixed' strategy with custom separators.",
+    response_description="Returns a list of generated text chunks.",
+    status_code=status.HTTP_200_OK,
+)
+async def chunk_text(
+    request: ChunkTextRequest,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+) -> JSONResponse:
+    """
+    Chunk text using recursive or fixed strategy, optionally with custom separators.
+    """
+    try:
+        chunker = TextChunker(chunk_size=request.chunk_size, overlap=request.overlap)
+        logger.info(
+            f"Chunking text using {request.criteria} with size={request.chunk_size}, overlap={request.overlap}, separators={request.separators}"
+        )
+
+        if request.criteria == "recursive":
+            chunks = chunker.recursive_chunk(request.input_text, separators=request.separators)
+        elif request.criteria == "fixed":
+            chunks = chunker.fixed_chunk(request.input_text)
+        else:
+            raise ValueError(f"Unsupported chunking type: {request.criteria}")
+
+        logger.info(f"Generated {len(chunks)} chunks successfully.")
+        return JSONResponse(status_code=200, content={"chunks": chunks, "total_chunks": len(chunks)})
+
+    except ValueError as e:
+        logger.error(f"Invalid input: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Unexpected error occurred during chunking.")
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/document_store_router.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from starlette.responses import JSONResponse
 
@@ -3611,9 +4697,9 @@ from src.models.storage_payload import (
 from src.repository.document_repository import DocumentRepository
 from src.services.embedding_service import EmbeddingService
 from src.services.pgvector_document_store import PGVectorDocumentStore
-from src.utility.collection_helpers import (
+from src.utility.vector_store_helpers import (
     check_embedding_model,
-    validate_collection_access,
+    validate_store_access,
 )
 
 router = APIRouter()
@@ -3639,7 +4725,7 @@ async def index(
     header_information: HeaderInformation = Depends(validate_headers_and_api_key),
     open_ai_sdk: OpenAISdk = Depends(get_openai_service),
 ) -> JSONResponse:
-    model_name = await validate_collection_access(header_information.x_base_api_key, request.collection)
+    model_name = await validate_store_access(header_information.x_base_api_key, request.collection)
     model_path, embedding_dimensions, context_length = await check_embedding_model(model_name=model_name)
     logger.info(
         f"Indexing request from {header_information.x_session_id} for collection: {request.collection} and document count: {len(request.documents)} for model_name: {model_name}"
@@ -3684,7 +4770,7 @@ async def search(
     header_information: HeaderInformation = Depends(validate_headers_and_api_key),
     open_ai_sdk: OpenAISdk = Depends(get_openai_service),
 ) -> SearchResponse:
-    model_name = await validate_collection_access(header_information.x_base_api_key, request.collection)
+    model_name = await validate_store_access(header_information.x_base_api_key, request.collection)
     model_path, embedding_dimensions, context_length = await check_embedding_model(model_name=model_name)
     logger.info(f"Search Request {request} from {header_information.x_session_id}")
     if request.storage_backend.lower() == StorageBackend.PGVECTOR.value:
@@ -3716,7 +4802,7 @@ async def delete(
     header_information: HeaderInformation = Depends(validate_headers_and_api_key),
     open_ai_sdk: OpenAISdk = Depends(get_openai_service),
 ) -> DeleteResponse:
-    model_name = await validate_collection_access(header_information.x_base_api_key, request.collection)
+    model_name = await validate_store_access(header_information.x_base_api_key, request.collection)
     _, embedding_dimensions, context_length = await check_embedding_model(model_name=model_name)
     logger.info(f"Delete request for collection: {request.collection}")
     if request.storage_backend.lower() == StorageBackend.PGVECTOR.value:
@@ -3748,7 +4834,7 @@ async def delete_by_ids(
     header_information: HeaderInformation = Depends(validate_headers_and_api_key),
     open_ai_sdk: OpenAISdk = Depends(get_openai_service),
 ) -> DeleteResponse:
-    model_name = await validate_collection_access(header_information.x_base_api_key, request.collection)
+    model_name = await validate_store_access(header_information.x_base_api_key, request.collection)
     _, embedding_dimensions, context_length = await check_embedding_model(model_name=model_name)
     logger.info(f"Delete by IDs request for collection: {request.collection} with ids: {request.index_ids}")
     if request.storage_backend.lower() == StorageBackend.PGVECTOR.value:
@@ -3772,7 +4858,9 @@ async def delete_by_ids(
     else:
         raise UnsupportedStorageBackendError(f"Unsupported storage backend: {request.storage_backend}")
 
->> /genai_platform_services/src/api/routers/genai_model_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/genai_model_router.py
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -3808,10 +4896,226 @@ async def list_genai_models(
             detail=f"An error occurred while fetching genai models: {str(e)}",
         )
 
->> /genai_platform_services/src/api/routers/text_to_speech_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/vector_store_router.py
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from src.api.deps import get_openai_service, validate_headers_and_api_key
+from src.config import get_settings
+from src.db.platform_meta_tables import VectorStoreInfo
+from src.exception.document_store_exception import UnsupportedStorageBackendError
+from src.exception.exceptions import DatabaseConnectionError
+from src.integrations.open_ai_sdk import OpenAISdk
+from src.logging_config import Logger
+from src.models.headers import HeaderInformation
+from src.models.vector_store_payload import (
+    CreateVectorStoreRequest,
+    CreateVectorStoreResponse,
+    DeleteVectorStoreResponse,
+    ListVectorStoresResponse,
+    SearchVectorStoreRequest,
+    SearchVectorStoreResponse,
+    StorageBackend,
+)
+from src.repository.base_repository import BaseRepository
+from src.repository.document_repository import DocumentRepository
+from src.services.embedding_service import EmbeddingService
+from src.services.pgvector_vector_store import PGVectorVectorStore
+from src.utility.vector_store_helpers import (
+    check_embedding_model,
+    get_usecase_id_by_api_key,
+    validate_store_access,
+)
+from src.utility.vector_store_utils import is_valid_name
+
+router = APIRouter()
+logger = Logger.create_logger(__name__)
+settings = get_settings()
+
+
+@router.post(
+    settings.vector_stores,
+    response_model=CreateVectorStoreResponse,
+    summary="Creates a Vector Store",
+    status_code=status.HTTP_200_OK,
+)
+async def create_vector_store(
+    request: CreateVectorStoreRequest,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    open_ai_sdk: OpenAISdk = Depends(get_openai_service),
+) -> CreateVectorStoreResponse:
+    try:
+        if request.storage_backend is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="'storage_backend' must be supplied"
+            )
+
+        if request.storage_backend.lower() == StorageBackend.PGVECTOR.value:
+            is_valid, error_message = is_valid_name(request.name)
+            if is_valid:
+                usecase_id = await get_usecase_id_by_api_key(header_information.x_base_api_key)
+                embedding_service = EmbeddingService(open_ai_sdk)
+                document_repository = DocumentRepository(request.name, embedding_dimensions=0)
+                pgvector_vector_storage = PGVectorVectorStore(
+                    embedding_service=embedding_service,
+                    document_repository=document_repository,
+                )
+                return await pgvector_vector_storage.create_store(payload=request, usecase_id=usecase_id)
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": error_message})
+        else:
+            raise UnsupportedStorageBackendError(f"Unsupported storage backend: {request.storage_backend}")
+    except HTTPException:
+        raise
+    except DatabaseConnectionError:
+        raise
+    except Exception as exc:
+        logger.exception("Unhandled exception in vector-store creation")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.get(
+    settings.vector_stores,
+    response_model=ListVectorStoresResponse,
+    summary="Lists all Vector Stores.",
+    status_code=status.HTTP_200_OK,
+)
+async def list_vector_stores(
+    limit: int = 50,
+    after: str | None = None,
+    before: str | None = None,
+    order: Literal["asc", "desc"] = Query("desc"),
+    storage_backend: Literal["pgvector", "elasticsearch"] = Query("pgvector"),
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    open_ai_sdk: OpenAISdk = Depends(get_openai_service),
+) -> ListVectorStoresResponse:
+    try:
+        if storage_backend.lower() == StorageBackend.PGVECTOR.value:
+            usecase_id = await get_usecase_id_by_api_key(header_information.x_base_api_key)
+            embedding_service = EmbeddingService(open_ai_sdk)
+            document_repository = DocumentRepository("dummy_vs", embedding_dimensions=0)
+            pgvector_vector_storage = PGVectorVectorStore(
+                embedding_service=embedding_service,
+                document_repository=document_repository,
+            )
+            raw_stores = await pgvector_vector_storage.list_stores(
+                usecase_id=usecase_id, limit=limit + 1, after=after, before=before, order=order
+            )
+            stores = raw_stores[:limit]
+            has_more = len(raw_stores) > limit
+            first_id = stores[0].id or None
+            last_id = stores[-1].id or None
+            return ListVectorStoresResponse(
+                object="list", data=stores, first_id=first_id, last_id=last_id, has_more=has_more
+            )
+
+        else:
+            raise UnsupportedStorageBackendError(f"Unsupported storage backend: {storage_backend}")
+    except ConnectionError as e:
+        raise e
+    except Exception as e:
+        logger.exception("Error creating collection.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post(
+    f"{settings.vector_stores}/{{store_id}}/search",
+    response_model=SearchVectorStoreResponse,
+    summary="Searches a Vector Store (semantic / hybrid / full-text)",
+    description=(
+        "Executes a hybrid search combining semantic similarity and keyword-based full-text search over "
+        "documents stored in the configured vector database. Accepts a query and optional filters (e.g., topic), "
+        "and returns the most relevant documents based on embeddings and metadata fields. This endpoint supports "
+        "filtering, ranking, and result explanation features depending on the backend implementation."
+    ),
+    status_code=status.HTTP_200_OK,
+)
+async def search_vector_store(
+    store_id: str,
+    request: SearchVectorStoreRequest,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    open_ai_sdk: OpenAISdk = Depends(get_openai_service),
+) -> SearchVectorStoreResponse:
+    try:
+        model_name = await validate_store_access(
+            api_key=header_information.x_base_api_key, vector_store=store_id, service_type="vectorstore"
+        )
+        model_path, embedding_dimensions, context_length = await check_embedding_model(model_name=model_name)
+        logger.info(f"Search Request {request} from {header_information.x_session_id}")
+        if request.storage_backend.lower() == StorageBackend.PGVECTOR.value:
+            embedding_service = EmbeddingService(open_ai_sdk)
+            row_data = BaseRepository.select_one(db_tbl=VectorStoreInfo, filters={"id": store_id})  # type: ignore
+            if row_data:
+                store_name = row_data["name"]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=f"Vector store with Id '{store_id}' not found."
+                )
+            document_repository = DocumentRepository(f"{store_name}_chunks", embedding_dimensions=embedding_dimensions)
+            if document_repository.check_table_exists():
+                print(f"## {document_repository}")
+                pgvector_vector_storage = PGVectorVectorStore(
+                    embedding_service=embedding_service,
+                    document_repository=document_repository,
+                )
+                return await pgvector_vector_storage.search_vector_store(
+                    request, store_id, model_name, context_length, model_path
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Vector Store '{store_name}' with Id '{store_id}' does not exist",
+                )
+        else:
+            raise UnsupportedStorageBackendError(f"Unsupported storage backend: {request.storage_backend}")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.delete(
+    f"{settings.vector_stores}/{{vector_store_id}}",
+    summary="Deletes a Vector Store along with it's metadata and content",
+    status_code=status.HTTP_200_OK,
+)
+async def delete_vector_store(
+    vector_store_id: str,
+    storage_backend: Literal["pgvector", "elasticsearch"] = Query("pgvector"),
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    open_ai_sdk: OpenAISdk = Depends(get_openai_service),
+) -> DeleteVectorStoreResponse:
+    if storage_backend.lower() == StorageBackend.PGVECTOR.value:
+        try:
+            embedding_service = EmbeddingService(open_ai_sdk)
+            document_repository = DocumentRepository(vector_store_id, embedding_dimensions=0)
+            pgvector_vector_storage = PGVectorVectorStore(
+                embedding_service=embedding_service,
+                document_repository=document_repository,
+            )
+            usecase_id = await get_usecase_id_by_api_key(header_information.x_base_api_key)
+            return await pgvector_vector_storage.delete(vector_store_id, usecase_id)  # type: ignore
+        except HTTPException as e:
+            raise e
+        except ConnectionError:
+            raise
+        except DatabaseConnectionError:
+            raise
+        except Exception as e:
+            logger.exception("Error deleting vector store.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    else:
+        raise UnsupportedStorageBackendError(f"Unsupported storage backend: {storage_backend}")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/text_to_speech_router.py
+import base64
+import io
+import wave
+
 import opik
 from fastapi import APIRouter, Depends, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from src.api.deps import get_speech_service, validate_headers_and_api_key
 from src.config import get_settings
@@ -3851,7 +5155,67 @@ async def get_speech(
         logger.error(f"Error during transcription: {e}", exc_info=True)
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"error": str(e)})
 
->> /genai_platform_services/src/api/routers/embeddings_router.py
+
+@router.post(
+    f"{settings.tts_endpoint}/file-inference",
+    summary="Text-to-Speech File Inference",
+    description="Converts text to speech and returns a downloadable audio file",
+    status_code=status.HTTP_200_OK,
+)
+@opik.track
+async def get_speech_file_inference(
+    request: TTSRequest,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    speech_service: SpeechService = Depends(get_speech_service),
+) -> Response:
+    try:
+        if len(request.text) <= 1:
+            return JSONResponse(
+                status_code=400,
+                content={"message": "No text received. Please add text for conversion to audio."},
+            )
+
+        result = await speech_service.perform_text_to_speech(request)
+        audio_base64 = result.get("audio", "No Audio")
+
+        if audio_base64 == "No Audio":
+            return JSONResponse(
+                status_code=500,
+                content={"message": "Audio conversion failed. No audio returned from the TTS service."},
+            )
+
+        try:
+            raw_pcm = base64.b64decode(audio_base64)
+        except Exception as decode_error:
+            logger.error(f"Error decoding audio from base64: {decode_error}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={"message": "Failed to decode audio data from the TTS service."},
+            )
+
+        sample_rate = 24000
+        num_channels = 1
+        sample_width = 2
+
+        wav_bytes_io = io.BytesIO()
+        with wave.open(wav_bytes_io, "wb") as wav_file:
+            wav_file.setnchannels(num_channels)
+            wav_file.setsampwidth(sample_width)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(raw_pcm)
+
+        # Important: reset the buffer's current position to the beginning.
+        wav_bytes_io.seek(0)
+
+        # Return a streaming response with a forced filename download header.
+        headers = {"Content-Disposition": 'attachment; filename="Output.wav"'}
+        return StreamingResponse(wav_bytes_io, media_type="audio/wav", headers=headers)
+
+    except Exception as e:
+        logger.error(f"Error during file inference: {e}", exc_info=True)
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"error": str(e)})
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/embeddings_router.py
 import opik
 from fastapi import APIRouter, Depends, HTTPException, status
 from openai.types.create_embedding_response import CreateEmbeddingResponse
@@ -3908,7 +5272,7 @@ async def embeddings(
     response = await open_ai_sdk.embedding(request, header_information.x_session_id)
     return response
 
->> /genai_platform_services/src/api/routers/rag_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/rag_router.py
 from fastapi import APIRouter, Depends, status
 
 from src.api.deps import get_openai_service, validate_headers_and_api_key
@@ -3924,11 +5288,11 @@ from src.repository.document_repository import DocumentRepository
 from src.services.embedding_service import EmbeddingService
 from src.services.pgvector_document_store import PGVectorDocumentStore
 from src.services.rag_service import RAGService
-from src.utility.collection_helpers import (
-    check_embedding_model,
-    validate_collection_access,
-)
 from src.utility.guardrails import scan_prompt
+from src.utility.vector_store_helpers import (
+    check_embedding_model,
+    validate_store_access,
+)
 
 router = APIRouter()
 logger = Logger.create_logger(__name__)
@@ -3954,7 +5318,7 @@ async def rag(
     open_ai_sdk: OpenAISdk = Depends(get_openai_service),
 ) -> RAGResponse:
     logger.info(f"RAG Request {request} from {header_information.x_session_id}")
-    model_name = await validate_collection_access(header_information.x_base_api_key, request.collection)
+    model_name = await validate_store_access(header_information.x_base_api_key, request.collection)
     model_path, embedding_dimensions, context_length = await check_embedding_model(model_name=model_name)
     if settings.guardrail_enabled:
         logger.info("Guardrails enabled. Validating user query...")
@@ -3993,7 +5357,7 @@ async def rag(
     else:
         raise UnsupportedStorageBackendError(f"Unsupported storage backend: {request.storage_backend}")
 
->> /genai_platform_services/src/api/routers/chatcompletion_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/chatcompletion_router.py
 from typing import Annotated
 
 import opik
@@ -4094,7 +5458,7 @@ async def chat_completion(
             detail=f"Internal Server Error: {exc}",
         ) from exc
 
->> /genai_platform_services/src/api/routers/internal/speech_to_text_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/speech_to_text_router.py
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import JSONResponse
 from starlette import status
@@ -4133,20 +5497,26 @@ async def speech_to_text(
         logger.error(f"Error during transcription: {e}", exc_info=True)
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"error": str(e)})
 
->> /genai_platform_services/src/api/routers/internal/playground_chatcompletion_router.py
-from typing import Annotated
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/playground_chatcompletion_router.py
+from typing import Dict, List, Union
 
 import opik
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from google.genai.types import Content, Part
 
-from src.api.deps import get_openai_service_internal, validate_user_token_api_call
+from src.api.deps import get_memory_client, validate_request_user_token_params
 from src.config import get_settings
-from src.integrations.open_ai_sdk import OpenAISdk
+from src.integrations.redis_chatbot_memory import RedisShortTermMemory
 from src.logging_config import Logger
 from src.models.headers import HeaderInformation
 from src.models.playground_chatcompletion_payload import (
+    PlaygroundChatTitleUpdateRequest,
+    PlaygroundDeleteAllChatHistoryRequest,
+    PlaygroundDeleteHistoryByIdRequest,
     PlaygroundRequest,
     PlaygroundResponse,
+    PlaygroundUserHistoryByIdRequest,
+    PlaygroundUserHistoryRequest,
 )
 from src.services.playground_chat_completion_service import (
     PlaygroundChatCompletionService,
@@ -4155,6 +5525,18 @@ from src.services.playground_chat_completion_service import (
 router = APIRouter()
 logger = Logger.create_logger(__name__)
 settings = get_settings()
+
+
+def serialize_content(content: Union[Content, dict]) -> dict:
+    """Convert Content object to JSON-serializable dict."""
+    if isinstance(content, Content):
+        return {
+            "role": content.role,
+            "content": " ".join(
+                part.text for part in (content.parts or []) if hasattr(part, "text") and isinstance(part.text, str)
+            ),
+        }
+    return content
 
 
 @router.post(
@@ -4167,16 +5549,183 @@ settings = get_settings()
 )
 @opik.track
 async def playground_chat_completion(
+    background_task: BackgroundTasks,
     request: PlaygroundRequest,
-    open_ai_sdk: Annotated[OpenAISdk, Depends(get_openai_service_internal)],
-    header_information: HeaderInformation = Depends(validate_user_token_api_call),
+    header_information: HeaderInformation = Depends(validate_request_user_token_params),
     service: PlaygroundChatCompletionService = Depends(PlaygroundChatCompletionService),
+    memory: RedisShortTermMemory = Depends(get_memory_client),
 ) -> PlaygroundResponse:
-    logger.info(f"Playground  chat completion Request: {request} from session: {header_information.x_session_id}")
-    response = service.process(header_information.x_session_id, request)  # type: ignore
+    session_id = header_information.x_session_id or ""
+    chat_id = request.chat_id
+    user_id = request.user_id
+    title = request.title
+
+    chat_history = []
+    relevant_memories = []
+
+    if chat_id and user_id:
+        relevant_memory_dict = memory.get_relevant_user_chat_memory(user_id, chat_id)
+        relevant_memories = relevant_memory_dict.get("messages", [])
+
+        for item in relevant_memories:
+            if isinstance(item, dict) and "role" in item and "content" in item:
+                if isinstance(item["content"], str):
+                    chat_history.append(Content(role=item["role"], parts=[Part.from_text(text=item["content"])]))
+            elif isinstance(item, Content) and item.parts:
+                for part in item.parts:
+                    if hasattr(part, "text") and isinstance(part.text, str):
+                        chat_history.append(Content(role=item.role, parts=[Part.from_text(text=part.text)]))
+
+    # Generate response from model
+    response = service.process(session_id, request, chat_history)
+
+    # Only store memory if both user_id and chat_id are present
+    if chat_id and user_id:
+        new_messages = [
+            Content(role="user", parts=[Part.from_text(text=request.user_prompt or "")]),
+            Content(role="assistant", parts=[Part.from_text(text=response.content or "")]),
+        ]
+        serialized_memories = relevant_memories + [serialize_content(m) for m in new_messages]
+
+        background_task.add_task(memory.store_user_chat_history, user_id, chat_id, serialized_memories, title=title)
+
     return response
 
->> /genai_platform_services/src/api/routers/internal/file_processing_router.py
+
+@router.post(
+    f"{settings.playground_user_history_endpoint}",
+    summary="Query to fetch history of user",
+    description="To fetch history of user for 7 days",
+    response_description="List of dictionary of string",
+    status_code=status.HTTP_200_OK,
+)
+async def export_user_chat_summary(
+    request: PlaygroundUserHistoryRequest,
+    header_information: HeaderInformation = Depends(validate_request_user_token_params),
+    memory: RedisShortTermMemory = Depends(get_memory_client),
+) -> List[Dict[str, str]]:
+    try:
+        user_id = request.user_id
+        page = request.page or 1
+        limit = request.limit or 10
+        user_histories = memory.get_all_user_chat_summaries(user_id, page, limit)
+        return user_histories
+
+    except Exception:
+        logger.error(f"Error while exporting the chat history for user: {user_id}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post(
+    f"{settings.playground_user_history_by_id_endpoint}",
+    summary="Query to fetch history of user based on chat id",
+    description="to fetch history of user for for a particular chat id",
+    response_description="List of dictionary",
+    status_code=status.HTTP_200_OK,
+)
+async def export_user_chat_by_id(
+    request: PlaygroundUserHistoryByIdRequest,
+    header_information: HeaderInformation = Depends(validate_request_user_token_params),
+    memory: RedisShortTermMemory = Depends(get_memory_client),
+) -> dict[str, Union[str, list[dict[str, str]]]]:
+    try:
+        user_id = request.user_id
+        chat_id = request.chat_id
+        page = request.page or 1
+        limit = (request.limit or 10) * 2
+        user_histories = memory.get_chat_history_by_id(user_id, chat_id, page, limit)
+        return user_histories
+
+    except Exception:
+        logger.error(f"Error while exporting the chat history for user: {user_id} and chat_id {chat_id}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.put(
+    f"{settings.playground_update_chat_title_endpoint}",
+    summary="To rename the title of the chat",
+    description="To rename the title of the chat",
+    response_description="Updated chat title",
+    status_code=status.HTTP_200_OK,
+)
+@opik.track
+async def update_chat_title(
+    request: PlaygroundChatTitleUpdateRequest,
+    header_information: HeaderInformation = Depends(validate_request_user_token_params),
+    memory: RedisShortTermMemory = Depends(get_memory_client),
+) -> Dict[str, str]:
+    try:
+        user_id = request.user_id
+        chat_id = request.chat_id
+        title = request.title
+        updated = memory.update_chat_title(user_id=user_id, chat_id=chat_id, new_title=title)
+        if not updated:
+            return {"message": f"Chat history not found with user_id = {user_id} and chat_id = {chat_id}"}
+        return {"message": f"Title has been successfully updated to {title}"}
+
+    except Exception:
+        logger.error(f"Error while updating the chat title for user: {user_id} and chat_id {chat_id}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete(
+    f"{settings.playground_delete_history_by_ids_endpoint}",
+    summary="To delete the chat history of a user",
+    description="To delete the chat history of a user",
+    response_description="Successfull or Unsuccessfull",
+    status_code=status.HTTP_200_OK,
+)
+@opik.track
+async def delete_chat_history_by_ids(
+    request: PlaygroundDeleteHistoryByIdRequest,
+    header_information: HeaderInformation = Depends(validate_request_user_token_params),
+    memory: RedisShortTermMemory = Depends(get_memory_client),
+) -> Dict[str, str]:
+    try:
+        user_id = request.user_id
+        chat_ids = request.chat_ids
+        blank_chat_ids = []
+        for chat_id in chat_ids:
+            deleted = memory.delete_chat_by_chatid(user_id, chat_id)
+            if not deleted:
+                blank_chat_ids.append(chat_id)
+
+        if not blank_chat_ids:
+            return {"message": f"Chat history for chat_ids={request.chat_ids} has been deleted successfully"}
+
+        return {
+            "message": f"Except chat_ids={blank_chat_ids}, rest all chats has been deleted successfully. For these chat_ids there were no history"
+        }
+
+    except Exception:
+        logger.error(f"Error while deleting chats for user: {user_id} and chat_ids {chat_ids}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete(
+    f"{settings.playground_delete_all_chat_history_endpoint}",
+    summary="To delete all chat history of a user",
+    description="To delete all chat history of a user",
+    response_description="Successfull or Unsuccessfull",
+    status_code=status.HTTP_200_OK,
+)
+@opik.track
+async def delete_all_chat_history(
+    request: PlaygroundDeleteAllChatHistoryRequest,
+    header_information: HeaderInformation = Depends(validate_request_user_token_params),
+    memory: RedisShortTermMemory = Depends(get_memory_client),
+) -> Dict[str, str]:
+    try:
+        user_id = request.user_id
+        deleted_count = memory.delete_all_chats_for_user(user_id)
+        if not deleted_count:
+            return {"message": f"No history found for the user_id = {user_id}"}
+        return {"message": f"{deleted_count} chat's deleted for user_id={user_id}"}
+    except Exception:
+        logger.error(f"Error while deleting all chats for user: {user_id}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/file_processing_router.py
 import os
 import shutil
 import tempfile
@@ -4234,7 +5783,7 @@ async def file_processing(
     logger.info(f"stored_files processed: {gs_files}")
     return JSONResponse(content={"stored_files": gs_files}, status_code=status.HTTP_200_OK)
 
->> /genai_platform_services/src/api/routers/internal/document_qna_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/document_qna_router.py
 from fastapi import APIRouter, Depends, status
 
 from src import config
@@ -4271,7 +5820,7 @@ async def query_document(
         logger.exception(f"LLM failed to generate response to response query {request.query}")
         raise DocumentQNAError(f"Unexpected error during LLM call: {str(e)}")
 
->> /genai_platform_services/src/api/routers/internal/upload_file_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/upload_file_router.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
@@ -4311,7 +5860,7 @@ async def upload_object(
             detail="An unexpected error occurred while uploading the file",
         )
 
->> /genai_platform_services/src/api/routers/internal/playground_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/playground_router.py
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
@@ -4385,7 +5934,9 @@ async def chat_with_llm(
     background_task.add_task(memory.add_to_memory, session_id=session_id, responses=relevant_memories)
     return JSONResponse(content=final_response)
 
->> /genai_platform_services/src/api/routers/internal/generate_qna_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/generate_qna_router.py
 import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -4465,7 +6016,7 @@ async def generate_qna(
     finally:
         file_upload_service.clean_temp_file(file_path)
 
->> /genai_platform_services/src/api/routers/internal/genai_model_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/genai_model_router.py
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -4493,7 +6044,7 @@ async def list_genai_models(
     genai_model_service: GenAIModelsService = Depends(get_genai_model_service),
 ) -> dict[str, Any]:
     try:
-        return await genai_model_service.get_genai_models(settings.default_api_key, model_type)
+        return await genai_model_service.get_genai_models(settings.default_litellm_api_key, model_type)
     except Exception as e:
         logger.exception("Error fetching genai models.")
         raise HTTPException(
@@ -4501,7 +6052,7 @@ async def list_genai_models(
             detail=f"An error occurred while fetching genai models: {str(e)}",
         )
 
->> /genai_platform_services/src/api/routers/internal/text_to_speech_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/text_to_speech_router.py
 import opik
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
@@ -4544,7 +6095,7 @@ async def get_speech(
         logger.error(f"Error during transcription: {e}", exc_info=True)
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"error": str(e)})
 
->> /genai_platform_services/src/api/routers/internal/export_traces_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/export_traces_router.py
 from typing import Annotated, Any, Dict
 from datetime import datetime
 from fastapi import APIRouter, Depends, status
@@ -4581,7 +6132,7 @@ async def export_traces(
         if not user_api_key_team_alias or not user_api_key_team_id:
             raise ValueError("user_api_key_team_alias or user_api_key_team_id is missing or invalid")
 
-        filter_by_alias = f'metadata.user_api_key_team_alias = "{user_api_key_team_alias}"'
+        filter_by_alias = f'metadata.user_api_key_team_id = "{user_api_key_team_alias}"'
         traces_by_alias = client.search_traces(
             project_name=settings.opik_project_name,
             filter_string=filter_by_alias,
@@ -4617,7 +6168,7 @@ async def export_traces(
         logger.exception("Unexpected error occurred while fetching traces.")
         return {"error": str(e)}
 
->> /genai_platform_services/src/api/routers/internal/chatcompletion_router.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/internal/chatcompletion_router.py
 from typing import Annotated
 
 import opik
@@ -4630,7 +6181,7 @@ from src.config import get_settings
 from src.exception.scanner_exceptions import ScanFailedException
 from src.integrations.open_ai_sdk import OpenAISdk
 from src.logging_config import Logger
-from src.models.completion_payload import ChatCompletionRequestInternal
+from src.models.completion_payload_internal import ChatCompletionRequestInternal
 from src.models.headers import InternalHeaderInformation
 from src.prompts.default_prompts import DEFAULT_SYSTEM_PROMPT
 from src.utility.utils import fetch_prompt_by_prompt_name
@@ -4661,7 +6212,7 @@ async def chat_completion(
     """
 
     if request.prompt_name:
-        logger.info("Fetching prompt by Name %s", request.prompt_name)
+        logger.info("Fetching prompt by ID %s", request.prompt_name)
         try:
             system_prompt = await fetch_prompt_by_prompt_name(
                 prompt_name=request.prompt_name,
@@ -4731,7 +6282,9 @@ async def chat_completion(
             detail=f"Internal Server Error: {exc}",
         ) from exc
 
->> /genai_platform_services/src/api/routers/v2/document_store_router_v2.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/v2/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/api/routers/v2/document_store_router_v2.py
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, Request, status
@@ -4885,7 +6438,9 @@ async def create(
         return JSONResponse(content=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
         # raise Exception("Exception while creating Document Collection ")
 
->> /genai_platform_services/src/exception/scanner_exceptions.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/exception/__init__.py
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/exception/scanner_exceptions.py
 class ScanFailedException(Exception):
     def __init__(self, scanners: dict, is_valid: bool, input_prompt: str, message: str = "Guardrails scan failed."):
         super().__init__(message)
@@ -4895,7 +6450,7 @@ class ScanFailedException(Exception):
         self.input_prompt = input_prompt
         self.status_code = 400
 
->> /genai_platform_services/src/exception/rag_exception.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/exception/rag_exception.py
 class RAGError(Exception):
     """Base class for all RAG-related exceptions."""
 
@@ -4919,13 +6474,14 @@ class DocumentQNAError(RAGError):
 
     pass
 
->> /genai_platform_services/src/exception/exceptions.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/exception/exceptions.py
 class DatabaseConnectionError(Exception):
     """DB connection Error"""
 
     pass
 
 
+# TODO - Remove
 class CollectionError(Exception):
     """Collection Error"""
 
@@ -4943,7 +6499,19 @@ class PdfChunkingError(Exception):
 
     pass
 
->> /genai_platform_services/src/exception/document_store_exception.py
+
+class VectorStoreCreationError(Exception):
+    """Raised when the atomic creation of a vector-store fails"""
+
+    pass
+
+
+class VectorStoreError(Exception):
+    """Vector Store Error"""
+
+    pass
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/exception/document_store_exception.py
 class DocumentStoreError(Exception):
     """Base class for search-related errors."""
 
@@ -4976,7 +6544,7 @@ class UnsupportedStorageBackendError(DocumentStoreError):
 class DocumentMaxTokenLimitExceededError(DocumentStoreError):
     pass
 
->> /genai_platform_services/src/client/opik_client.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/client/opik_client.py
 from functools import lru_cache
 
 from opik import Opik
@@ -4991,7 +6559,74 @@ def create_opik_client() -> Opik:
     # Initialize the Opik client
     return Opik(host=settings.opik_url_override, api_key=settings.opik_api_key, workspace=settings.opik_workspace)
 
->> /genai_platform_services/src/services/pgvector_document_store.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/pdf_extraction_service.py
+import os
+import shutil
+import tempfile
+from typing import Dict, List
+
+from fastapi import HTTPException, status
+from PyPDF2 import PdfReader
+
+from src.integrations.cloud_storage import CloudStorage
+from src.logging_config import Logger
+
+logger = Logger.create_logger(__name__)
+
+
+class PDFExtractionService:
+    """Service responsible for extracting text from PDFs stored in GCS."""
+
+    def __init__(self):  # type: ignore
+        self.cloud_service = CloudStorage()
+
+    def extract_from_gcs(self, gs_paths: List[str]) -> List[Dict[str, str]]:
+        """Extract text from a list of GCS PDF file paths."""
+        if not gs_paths:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No file paths provided for extraction.",
+            )
+
+        results = []
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            for gs_path in gs_paths:
+                local_pdf = os.path.join(temp_dir, os.path.basename(gs_path))
+                file_result = {"file_path": gs_path}
+
+                try:
+                    if not gs_path.startswith("gs://"):
+                        raise ValueError(f"Invalid GCS path: {gs_path}")
+
+                    # Download
+                    file_content = self.cloud_service.download_object(gs_path)
+                    with open(local_pdf, "wb") as temp_file:
+                        temp_file.write(file_content)
+
+                    # Extract text
+                    text = ""
+                    with open(local_pdf, "rb") as f:
+                        reader = PdfReader(f)
+                        for page in reader.pages:
+                            text += page.extract_text() or ""
+
+                    file_result["extracted_text"] = text.strip()
+                    logger.info(f"Extracted content from {gs_path}")
+
+                except Exception as e:
+                    file_result["error"] = str(e)
+                    logger.exception(f"Error extracting from {gs_path}: {e}")
+
+                results.append(file_result)
+
+            return results
+
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/pgvector_document_store.py
 import json
 import time
 from collections import defaultdict
@@ -5097,7 +6732,7 @@ class PGVectorDocumentStore(AbstractDocumentStore):
             raise DocumentStoreIndexingError(f"Unexpected error during indexing: {str(e)}")
 
     async def fulltext_search(self, search_request: SearchRequest) -> list[SearchResult]:
-        results = self.document_repository.fulltext_search(
+        results, _ = self.document_repository.fulltext_search(
             query=search_request.search_text,
             search_terms=search_request.content_filter,
             include_links=search_request.link_filter,
@@ -5113,7 +6748,7 @@ class PGVectorDocumentStore(AbstractDocumentStore):
             batch=[search_request.search_text],
         )
         query_vector = embeddings.data[0].embedding
-        results = self.document_repository.sematic_search(
+        results, _ = self.document_repository.sematic_search(
             query_vector=query_vector,
             search_terms=search_request.content_filter,
             include_links=search_request.link_filter,
@@ -5185,7 +6820,7 @@ class PGVectorDocumentStore(AbstractDocumentStore):
                 f"max {context_length} tokens, but received {token_count} tokens."
             )
 
->> /genai_platform_services/src/services/embedding_model_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/embedding_model_service.py
 from typing import Any
 
 from sqlalchemy import select
@@ -5212,7 +6847,7 @@ class EmbeddingsModelService:
             logger.info(f"Fetched {len(result)} embedding models from the database.")
             return {"models": result}
 
->> /genai_platform_services/src/services/abstract_document_store.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/abstract_document_store.py
 from abc import ABC, abstractmethod
 from typing import List
 
@@ -5313,7 +6948,7 @@ class AbstractDocumentStore(ABC):
         """Delete the  collection."""
         pass
 
->> /genai_platform_services/src/services/rag_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/rag_service.py
 import time
 import uuid
 
@@ -5440,7 +7075,7 @@ class RAGService:
             )
             raise RAGResponseGenerationError(f"Unexpected error during LLM call: {str(e)}")
 
->> /genai_platform_services/src/services/file_upload_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/file_upload_service.py
 import base64
 import datetime
 import os
@@ -5593,7 +7228,171 @@ class FileUploadService:
                 self.clean_temp_file(output_path)
             raise HTTPException(status_code=500, detail=f"Document conversion failed: {str(e)}")
 
->> /genai_platform_services/src/services/genai_model_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/vectorstore_service.py
+from datetime import datetime, timedelta
+from typing import Optional
+from uuid import uuid4
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import asc, desc
+
+from src.config import get_settings
+from src.db.platform_meta_tables import VectorStoreInfo
+from src.exception.exceptions import DatabaseConnectionError, VectorStoreError
+from src.logging_config import Logger
+from src.models.vector_store_payload import (
+    CreateVectorStoreRequest,
+    CreateVectorStoreResponse,
+    DeleteVectorStoreResponse,
+    FileCountsModel,
+    VectorStoreStatus,
+)
+from src.repository.base_repository import BaseRepository
+from src.repository.document_base_model import BaseModelOps
+from src.repository.vectorstore_ddl import VectorStoreDDL
+from src.utility.vector_store_helpers import check_embedding_model
+
+logger = Logger.create_logger(__name__)
+settings = get_settings()
+
+
+class VectorStoreService:
+    def __init__(self, base_repository: BaseRepository, base_model_ops: BaseModelOps):
+        self.base_repository = base_repository
+        self.base_model_ops = base_model_ops
+
+    async def create(self, request: CreateVectorStoreRequest, usecase_id: str) -> CreateVectorStoreResponse:
+        try:
+            _, embedding_dimensions, _ = await check_embedding_model(request.embedding_model)
+            col = self.base_repository.select_one(db_tbl=VectorStoreInfo, filters={"name": request.name})  # type: ignore
+            if col:
+                raise VectorStoreError(
+                    f"Vector Store '{request.name}' already exists (DB usecase id: {col['usecase_id']}, Request usecase id: {usecase_id})"
+                )
+
+            VectorStoreDDL.create_tables_and_index(table_name=request.name, dimensions=embedding_dimensions)
+
+            now_dt = datetime.now(ZoneInfo(settings.timezone))
+            expires_at: Optional[datetime] = None
+            if request.expires_after and request.expires_after.days:
+                expires_at = now_dt + timedelta(days=request.expires_after.days)
+
+            insert_data: dict = {
+                "id": str(uuid4()),
+                "name": request.name,
+                "usecase_id": usecase_id,
+                "model_name": request.embedding_model,
+                "created_at": now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "last_active_at": now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "metadata_vs": request.metadata or {},
+                "expires_after": request.expires_after.dict() if request.expires_after else None,
+                "file_counts": FileCountsModel().model_dump(),
+                **({"expires_at": expires_at.strftime("%Y-%m-%d %H:%M:%S")} if expires_at else {}),
+            }
+
+            self.base_repository.insert_one(db_tbl=VectorStoreInfo, data=insert_data)  # type: ignore
+
+            return CreateVectorStoreResponse(
+                id=insert_data["id"],
+                object="vector_store",
+                created_at=int(now_dt.timestamp()),
+                name=request.name,
+                usage_bytes=0,
+                file_counts=FileCountsModel(),
+                status=VectorStoreStatus.COMPLETED.value,
+                expires_after=request.expires_after,
+                expires_at=int(expires_at.timestamp()) if expires_at else None,
+                last_active_at=int(now_dt.timestamp()),
+                metadata=request.metadata if request.metadata else None,
+                last_error=None,
+            )
+        except VectorStoreError as e:
+            raise e
+        except DatabaseConnectionError:
+            raise
+        except Exception as e:
+            try:
+                VectorStoreDDL.drop_table_and_index(tbl_name=request.name)
+            except Exception as drop_err:
+                logger.warning(f"Cleanup failed: {drop_err}")
+            raise VectorStoreError(f"Failed to create vector store: {e}")
+
+    async def delete(self, vector_id: str, usecase_id: str) -> DeleteVectorStoreResponse:
+        """Deletes metadata first, then drops the tables.
+        If table drop fails, metadata is restored using insert_one().
+        """
+        try:
+            col = BaseRepository.select_one(db_tbl=VectorStoreInfo, filters={"id": vector_id})  # type: ignore
+            if not col:
+                raise VectorStoreError(f"Vector Store '{vector_id}' does not exist")
+
+            store_name = col["name"]
+            usecase_id_db = col["usecase_id"]
+            if usecase_id_db != usecase_id:
+                raise VectorStoreError(f"Vector Store '{vector_id}' access issue")
+
+            logger.info(f"Auth success: {vector_id} belongs to {usecase_id}")
+            backup_record = dict(col)
+            VectorStoreDDL.drop_table_and_index(tbl_name=store_name)
+            self.base_repository.delete(db_tbl=VectorStoreInfo, filters={"id": vector_id})  # type: ignore
+
+            try:
+                self.base_repository.delete(db_tbl=VectorStoreInfo, filters={"id": vector_id})  # type: ignore
+                logger.info(f"Deleted metadata for vector store '{vector_id}'")
+            except Exception as meta_del_err:
+                raise VectorStoreError(f"Failed to delete metadata for '{vector_id}': {meta_del_err}")
+
+            try:
+                VectorStoreDDL.drop_table_and_index(tbl_name=store_name)
+                logger.info(f"Dropped tables for vector store '{store_name}'")
+            except Exception as drop_err:
+                logger.error(f"Failed to drop tables for '{store_name}', restoring metadata: {drop_err}")
+
+                now_dt = datetime.utcnow()
+                insert_data = {
+                    "id": backup_record["id"],
+                    "name": backup_record["name"],
+                    "usecase_id": backup_record["usecase_id"],
+                    "model_name": backup_record.get("model_name"),
+                    "created_at": backup_record.get("created_at") or now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "last_active_at": backup_record.get("last_active_at") or now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "metadata_vs": backup_record.get("metadata_vs") or {},
+                    "expires_after": backup_record.get("expires_after"),
+                    "file_counts": backup_record.get("file_counts") or FileCountsModel().model_dump(),
+                    **({"expires_at": backup_record["expires_at"]} if backup_record.get("expires_at") else {}),
+                }
+
+                self.base_repository.insert_one(db_tbl=VectorStoreInfo, data=insert_data)  # type: ignore
+                raise VectorStoreError(f"Table drop failed for '{store_name}', metadata restored successfully.")
+
+            return DeleteVectorStoreResponse(
+                id=vector_id,
+                object="vector_store.deleted",
+                deleted=True,
+            )
+
+        except VectorStoreError as e:
+            raise e
+        except Exception as e:
+            logger.error(f"Unexpected error during delete for '{vector_id}': {e}")
+            raise VectorStoreError(f"Failed to delete vector store '{vector_id}': {e}")
+
+    async def get(self, usecase_id: str, orderby: str) -> dict[str, list[dict]]:
+        try:
+            if orderby.lower() not in {"asc", "desc"}:
+                raise VectorStoreError(f"Invalid orderby value '{orderby}'")
+            order_by_clause = (
+                desc(VectorStoreInfo.created_at) if orderby.lower() == "desc" else asc(VectorStoreInfo.created_at)
+            )
+            response = self.base_repository.select_many(  # type: ignore
+                db_tbl=VectorStoreInfo, filters={"usecase_id": usecase_id}, order_by=order_by_clause
+            )
+
+            return {"v_stores": response}  # type: ignore
+        except Exception as e:
+            raise VectorStoreError(f"Failed to create collection: {e}")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/genai_model_service.py
 from typing import Any
 
 import httpx
@@ -5622,12 +7421,13 @@ class GenAIModelsService:
         models_data = api_response.get("data", [])
         if not models_data:
             return {"message": "No LLM models found."}
+
         result = []
         for model in models_data:
             model_info = model.get("model_info", {})
             litellm_params = model.get("litellm_params", {})
-            model_mode = (model_info.get("mode") or litellm_params.get("mode") or "").lower()
-            if model_mode == model_type and not model.get("model_name").startswith("gemini-2.5-flash"):
+            model_mode = (model_info.get("mode") or litellm_params.get("mode") or "chat").lower()
+            if model_mode == model_type:
                 result.append(
                     {
                         "model_name": model.get("model_name"),
@@ -5636,10 +7436,17 @@ class GenAIModelsService:
                         "max_output_tokens": model_info.get("max_output_tokens"),
                     }
                 )
+            if model_type == "chat":
+                result = [
+                    model
+                    for model in result
+                    if model["model_name"].startswith("gemini-2.5") and "preview" not in model["model_name"]
+                ]
         logger.info("Fetched %s LLM models from the API.", len(result))
         return {"models": result}
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/__init__.py
 
->> /genai_platform_services/src/services/embedding_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/embedding_service.py
 from openai.types.create_embedding_response import CreateEmbeddingResponse
 
 from src.integrations.open_ai_sdk import OpenAISdk
@@ -5655,7 +7462,646 @@ class EmbeddingService:
         response = await self.open_ai_sdk.embedding(request)
         return response
 
->> /genai_platform_services/src/services/collection_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/pgvector_vector_store.py
+import json
+import time
+from collections import defaultdict
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+from fastapi import HTTPException
+
+from src.config import Settings, get_settings
+from src.db.connection import create_session
+from src.db.platform_meta_tables import VectorStoreInfo
+from src.exception.document_store_exception import (
+    DocumentMaxTokenLimitExceededError,
+    DocumentStoreIndexingError,
+    DocumentStoreSearchError,
+)
+from src.exception.exceptions import DatabaseConnectionError, VectorStoreError
+from src.logging_config import Logger
+from src.models.storage_payload import SearchRequest
+from src.models.vector_store_payload import (
+    AttributesItem,
+    ContentItem,
+    CreateVectorStoreFileRequest,
+    CreateVectorStoreFileResponse,
+    CreateVectorStoreRequest,
+    CreateVectorStoreResponse,
+    DeleteVectorStoreFileResponse,
+    DeleteVectorStoreResponse,
+    FileCountsModel,
+    FileStatus,
+    RetrieveFileResponse,
+    SearchResult,
+    SearchType,
+    SearchVectorStoreRequest,
+    SearchVectorStoreResponse,
+    VectorStoreErrorDetails,
+    VectorStoreStatus,
+)
+from src.repository.base_repository import BaseRepository
+from src.repository.document_base_model import BaseModelOps
+from src.repository.document_repository import DocumentRepository
+from src.services.embedding_service import EmbeddingService
+from src.services.tokenizer_service import TokenizerService
+from src.services.vectorstore_service import VectorStoreService
+from src.utility.vector_store_utils import (
+    create_chunks_tbl_model,
+    create_file_info_tbl_model,
+    get_deepsize,
+    payload_to_internal_format,
+)
+
+logger = Logger.create_logger(__name__)
+
+
+class PGVectorVectorStore:
+    def __init__(
+        self,
+        document_repository: DocumentRepository,
+        embedding_service: EmbeddingService,
+        settings: Settings = get_settings(),
+    ):
+        self.document_repository = document_repository
+        self.embedding_service = embedding_service
+        self.settings = settings
+        self.tokenizer_service = TokenizerService()
+
+    def _store_to_object(
+        self,
+        store_id: str,
+        name: str,
+        created_at: int,
+        status: str,
+        last_active_at: int,
+        file_count: int = 0,
+        vs_metadata: Optional[Dict[str, Any]] = None,
+        error_details: Optional[VectorStoreErrorDetails] = None,
+    ) -> CreateVectorStoreResponse:
+        return CreateVectorStoreResponse(
+            id=store_id,
+            created_at=created_at,
+            name=name,
+            object="vector_store",
+            file_counts=FileCountsModel(total=file_count),
+            status=status,
+            expires_after=None,
+            expires_at=None,
+            last_active_at=last_active_at,
+            metadata=vs_metadata,
+            last_error=error_details,
+        )
+
+    def _storefile_to_object(
+        self,
+        payload: CreateVectorStoreFileRequest,
+        data_size: int,
+        store_id: str,
+        status: str,
+        error_details: Optional[VectorStoreErrorDetails] = None,
+    ) -> CreateVectorStoreFileResponse:
+        return CreateVectorStoreFileResponse(
+            id=payload.file_id if getattr(payload, "file_id", None) else None,
+            object="vector_store.file",
+            usage_bytes=data_size,
+            created_at=int(time.time()),
+            vector_store_id=store_id,
+            status=status,
+            attributes=payload.attributes if getattr(payload, "attributes", None) else None,
+            chunking_strategy=payload.chunking_strategy.dict() if getattr(payload, "chunking_strategy", None) else None,  # type: ignore
+            last_error=error_details,
+        )
+
+    async def create_store(self, payload: CreateVectorStoreRequest, usecase_id: str) -> CreateVectorStoreResponse:
+        try:
+            vstore_svc = VectorStoreService(base_repository=BaseRepository(), base_model_ops=BaseModelOps())
+            result = await vstore_svc.create(request=payload, usecase_id=usecase_id)
+            if isinstance(result, dict):  # type: ignore
+                return CreateVectorStoreResponse.model_validate(result)  # type: ignore
+            return result
+        except Exception as e:
+            logger.info(str(e))
+            error_details = VectorStoreErrorDetails(code="server_error", message=str(e))
+            return self._store_to_object(
+                store_id="",
+                name=getattr(payload, "name", ""),
+                created_at=0,
+                status=VectorStoreStatus.FAILED.value,
+                last_active_at=0,
+                vs_metadata=payload.metadata if getattr(payload, "metadata", None) else None,
+                error_details=error_details,
+            )
+
+    async def create_store_file(
+        self,
+        payload: CreateVectorStoreFileRequest,
+        store_id: str,
+        store_name: str,
+        model_name: str,
+        context_length: int,
+        model_path: str,
+        embedding_dimensions: int,
+    ) -> CreateVectorStoreFileResponse:
+        try:
+            data_size = await self.index(
+                request=payload,
+                store_id=store_id,
+                store_name=store_name,
+                model_name=model_name,
+                context_length=context_length,
+                model_path=model_path,
+            )
+            vs_file_info = create_file_info_tbl_model(f"{store_name}_file_info")  # type: ignore
+            now_dt = datetime.now(ZoneInfo(self.settings.timezone))
+            insert_data: dict = {
+                "vs_id": store_id,
+                "file_id": payload.file_id,
+                "file_name": payload.file_name,
+                "file_version": "1",
+                "created_at": now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "usage_bytes": data_size,
+                "chunking_strategy": json.dumps(payload.chunking_strategy.dict())  # type: ignore
+                if getattr(payload, "chunking_strategy", None)
+                else None,
+                "attributes": payload.attributes or {},
+                "status": FileStatus.COMPLETED.value,
+            }
+            try:
+                with create_session() as session:
+                    BaseRepository.insert_one(db_tbl=vs_file_info, data=insert_data, session_factory=session)
+
+                    current_vs = BaseRepository.select_one(db_tbl=VectorStoreInfo, filters={"id": store_id})  # type: ignore
+
+                    current_file_counts = current_vs.get("file_counts", {}) if current_vs else {}
+                    if not current_file_counts:
+                        try:
+                            current_file_counts = FileCountsModel.model_dump()  # type: ignore
+                        except Exception:
+                            current_file_counts = {}
+
+                    updated_file_counts = current_file_counts.copy()
+                    updated_file_counts["completed"] = updated_file_counts.get("completed", 0) + 1
+                    updated_file_counts["total"] = updated_file_counts.get("total", 0) + 1
+
+                    update_data = {
+                        "last_active_at": now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                        "usage_bytes": (current_vs.get("usage_bytes", 0) if current_vs else 0) + data_size,
+                        "file_counts": updated_file_counts,
+                    }
+
+                    BaseRepository.update_many(db_tbl=VectorStoreInfo, filters={"id": store_id}, data=update_data)  # type: ignore
+            except Exception:
+                raise
+            return self._storefile_to_object(payload, data_size, store_id, FileStatus.COMPLETED.value)
+        except (DocumentMaxTokenLimitExceededError, DocumentStoreIndexingError) as e:
+            logger.warning("Indexing error: %s", str(e))
+            error_details = VectorStoreErrorDetails(code="server_error", message=str(e))
+            return self._storefile_to_object(payload, 0, store_id, FileStatus.FAILED.value, error_details)
+        except Exception as e:
+            logger.exception(f"Indexing failed for vector store: {store_id} with error: {str(e)}")
+            try:
+                self._cleanup_store_file(store_name, store_id, payload.file_id, embedding_dimensions)
+            except Exception as inner_e:
+                logger.error(f"Rollback of file info failed: {inner_e}")
+            error_details = VectorStoreErrorDetails(code="server_error", message=str(e))
+            return self._storefile_to_object(payload, 0, store_id, FileStatus.FAILED.value, error_details)
+
+    def _cleanup_store_file(self, store_name: str, store_id: str, file_id: str, embedding_dimensions: int) -> None:
+        try:
+            vs_file_info = create_file_info_tbl_model(f"{store_name}_file_info")  # type: ignore
+            BaseRepository.delete(
+                db_tbl=vs_file_info,
+                filters={"file_id": file_id, "vs_id": store_id},
+                session_factory=create_session,
+            )
+        except Exception as e:
+            logger.warning(f"Failed deleting file info during cleanup: {e}")
+
+        try:
+            vs_chunks = create_chunks_tbl_model(f"{store_name}_chunks", embedding_dimensions)  # type: ignore
+            BaseRepository.delete(db_tbl=vs_chunks, filters={"file_id": file_id}, session_factory=create_session)
+        except Exception as e:
+            logger.warning(f"Failed deleting chunks during cleanup: {e}")
+
+    def _content_length_validation(
+        self, context_length: int, model_name: str, model_path: str, text: str, validation_for: str
+    ) -> None:
+        index_or_search = "content" if validation_for == "index" else "search text"
+        token_count = self.tokenizer_service.get_token_count(model_name, text, model_path)
+        if token_count > context_length:
+            raise DocumentMaxTokenLimitExceededError(
+                f"Document exceeds the maximum allowed {index_or_search} length: "
+                f"max {context_length} tokens, but received {token_count} tokens."
+            )
+
+    async def index(
+        self,
+        request: CreateVectorStoreFileRequest,
+        store_id: str,
+        store_name: str,
+        model_name: str,
+        context_length: int,
+        model_path: str,
+    ) -> int:
+        try:
+            content_list: List[str] = []
+            for document in request.file_contents:
+                self._content_length_validation(context_length, model_name, model_path, document.content, "index")
+                content_list.append(document.content)
+            embeddings = await self.embedding_service.get_embeddings(model_name=model_name, batch=content_list)
+            docs_with_embeddings: List[Dict[str, Any]] = []
+            for i, doc in enumerate(request.file_contents):
+                doc_row = {
+                    "content": doc.content,
+                    "embedding": embeddings.data[i].embedding,
+                    "links": doc.links,
+                    "meta_data": json.dumps(doc.metadata, ensure_ascii=False),
+                    "topics": doc.topics,
+                    "author": doc.author,
+                }
+                docs_with_embeddings.append(doc_row)
+            self.document_repository.insert_documents(
+                table_name=f"{store_name}_chunks",
+                documents=docs_with_embeddings,
+                service_type="vectorstore",
+                file_id=request.file_id,
+                file_name=request.file_name,
+            )
+            return get_deepsize(docs_with_embeddings)
+        except (DocumentMaxTokenLimitExceededError, DocumentStoreIndexingError):
+            raise
+        except Exception as e:
+            logger.exception(
+                f"Indexing failed for vector store {store_id} with {len(request.file_contents) if getattr(request, 'file_contents', None) else 0} documents."
+            )
+            raise DocumentStoreIndexingError(f"Unexpected error during indexing: {str(e)}")
+
+    def _response_to_object_delete(self, vector_store_id: str, exception: bool = False) -> DeleteVectorStoreResponse:
+        """
+        Return DeleteVectorStoreResponse in a format similar to OpenAI's delete API,
+        """
+        if exception:
+            return DeleteVectorStoreResponse(id=vector_store_id, object="vector_store.deleted", deleted=False)
+        else:
+            return DeleteVectorStoreResponse(id=vector_store_id, object="vector_store.deleted", deleted=True)
+
+    async def delete(self, vector_id: str, usecase_id: str) -> DeleteVectorStoreResponse | None:
+        try:
+            VS_svc = VectorStoreService(base_repository=BaseRepository(), base_model_ops=BaseModelOps())
+            await VS_svc.delete(vector_id, usecase_id)
+            logger.info(str(f"Vector store '{vector_id}' deleted successfully."))
+            return self._response_to_object_delete(vector_id, exception=False)
+
+        except Exception as e:
+            logger.info(str(e))
+            return self._response_to_object_delete(vector_id, exception=True)
+
+    def _response_to_object_delete_file(
+        self, vector_store_file_id: str, exception: bool = False
+    ) -> DeleteVectorStoreFileResponse:
+        """
+        Return DeleteVectorStoreResponse in a format similar to OpenAI's delete API,
+        """
+        if exception:
+            return DeleteVectorStoreFileResponse(
+                id=vector_store_file_id, object="vector_store.file.deleted", deleted=False
+            )
+        else:
+            return DeleteVectorStoreFileResponse(
+                id=vector_store_file_id, object="vector_store.file.deleted", deleted=True
+            )
+
+    async def delete_by_id(
+        self, vectorstoreid: str, vectorstorefileid: str, usecase_id: str
+    ) -> DeleteVectorStoreFileResponse | None:
+        try:
+            col = BaseRepository.select_one(db_tbl=VectorStoreInfo, filters={"id": vectorstoreid})  # type: ignore
+            if not col:
+                raise VectorStoreError(f"Vector Store '{vectorstoreid}' does not exist")
+            print(col.keys())
+            store_name = col["name"]
+            usecase_id_db = col["usecase_id"]
+            if usecase_id_db != usecase_id:
+                raise VectorStoreError(f"Vector Store '{vectorstoreid}' access issue")
+            logger.info(f"Auth success for store {vectorstoreid} in usecase {usecase_id}")
+            vs_file_info = create_file_info_tbl_model(f"{store_name}_file_info")  # type: ignore
+            vs_chunks = create_chunks_tbl_model(f"{store_name}_chunks", dimensions=0)  # type: ignore
+            file_info_record = BaseRepository.select_one(
+                db_tbl=vs_file_info,
+                filters={"file_id": vectorstorefileid, "vs_id": vectorstoreid},
+                session_factory=create_session,
+            )
+            if not file_info_record:
+                raise VectorStoreError(f"File '{vectorstorefileid}' does not exist in vector store '{vectorstoreid}'")
+            deleted_file_size = file_info_record.get("usage_bytes", 0)
+            deleted_count_info = BaseRepository.delete(
+                db_tbl=vs_file_info,
+                filters={"file_id": vectorstorefileid, "vs_id": vectorstoreid},
+                session_factory=create_session,
+            )
+            try:
+                deleted_count_chunks = BaseRepository.delete(
+                    db_tbl=vs_chunks,
+                    filters={"file_id": vectorstorefileid},
+                    session_factory=create_session,
+                )
+            except Exception as chunk_del_err:
+                logger.error(
+                    f"Chunk delete failed for file '{vectorstorefileid}', restoring metadata...: {chunk_del_err}"
+                )
+                restore_data = {
+                    "vs_id": file_info_record["vs_id"],
+                    "file_id": file_info_record["file_id"],
+                    "file_name": file_info_record["file_name"],
+                    "file_version": file_info_record.get("file_version", "1"),
+                    "created_at": file_info_record.get("created_at"),
+                    "usage_bytes": file_info_record.get("usage_bytes", 0),
+                    "chunking_strategy": file_info_record.get("chunking_strategy"),
+                    "attributes": file_info_record.get("attributes") or {},
+                    "status": file_info_record.get("status", FileStatus.COMPLETED.value),
+                }
+                BaseRepository.insert_one(
+                    db_tbl=vs_file_info,
+                    data=restore_data,
+                    session_factory=create_session,
+                )
+                raise VectorStoreError(f"Chunk deletion failed for '{vectorstorefileid}', file metadata restored.")
+
+            if deleted_count_info > 0 and deleted_count_chunks > 0:
+                logger.info(f"Successfully deleted file '{vectorstorefileid}' from vector store '{vectorstoreid}'")
+                try:
+                    logger.info(f"Fetching current vector store info for id: {vectorstoreid}")
+                    current_vs = BaseRepository.select_one(db_tbl=VectorStoreInfo, filters={"id": vectorstoreid})  # type: ignore
+
+                    if not current_vs:
+                        logger.warning(f"No current_vs found for vectorstoreid: {vectorstoreid}")
+                        return self._response_to_object_delete_file(vectorstorefileid, exception=True)
+
+                    current_file_counts = current_vs.get("file_counts", {})
+                    if not current_file_counts:
+                        current_file_counts = FileCountsModel().model_dump()
+
+                    updated_file_counts = current_file_counts.copy()
+                    updated_file_counts["completed"] = max(updated_file_counts.get("completed", 0) - 1, 0)
+                    updated_file_counts["total"] = max(updated_file_counts.get("total", 0) - 1, 0)
+
+                    now_dt = datetime.now(ZoneInfo(self.settings.timezone))
+                    update_data = {
+                        "last_active_at": now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                        "usage_bytes": current_vs.get("usage_bytes", 0) - deleted_file_size,
+                        "file_counts": updated_file_counts,
+                    }
+                    logger.info(f"update_data to be passed to update_many: {update_data}")
+                    BaseRepository.update_many(  # type: ignore
+                        db_tbl=VectorStoreInfo,
+                        filters={"id": vectorstoreid},
+                        data=update_data,
+                    )
+
+                except Exception as e:
+                    logger.error(f"Exception in stats update block: {e}", exc_info=True)
+                    raise
+
+                return self._response_to_object_delete_file(vectorstorefileid, exception=False)
+
+            return self._response_to_object_delete_file(vectorstorefileid, exception=True)
+
+        except DatabaseConnectionError as e:
+            logger.error(f"Database connection error: {str(e)}")
+            raise VectorStoreError(
+                f"Vector store file '{vectorstorefileid}' does not exist in store '{vectorstoreid}'."
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to delete file '{vectorstorefileid}' from vector store '{vectorstoreid}': {e}")
+            return self._response_to_object_delete_file(vectorstorefileid, exception=True)
+
+    def _response_to_object_retrieve_file(
+        self,
+        vector_store_file: Optional[Dict[str, Any]],
+        exception: bool = False,
+    ) -> RetrieveFileResponse:
+        """Convert raw database results into a RetrieveFileResponse object."""
+        if exception or not vector_store_file:
+            return RetrieveFileResponse(
+                file_id=str(vector_store_file.get("file_id", "")),  # type: ignore
+                filename="",
+                attributes=[],
+                content=[],
+            )
+        attributes = []
+        metadata = vector_store_file.get("attributes", {})
+        if isinstance(metadata, dict):
+            for key, value in metadata.items():
+                attributes.append(AttributesItem(key=key, value=str(value)))
+        elif isinstance(metadata, list):  # defensive fallback
+            for attr in metadata:
+                if isinstance(attr, dict):
+                    attributes.append(AttributesItem(**attr))
+
+        content_items = []
+        for text_segment in vector_store_file.get("content", []):
+            if text_segment:
+                content_items.append(ContentItem(type="text", text=text_segment))
+
+        return RetrieveFileResponse(
+            file_id=str(vector_store_file.get("file_id", "")),
+            filename=str(vector_store_file.get("filename", "")),
+            attributes=attributes,
+            content=content_items,
+        )
+
+    async def retrieve_by_id(self, vectorstoreid: str, vectorstorefileid: str, usecase_id: str) -> RetrieveFileResponse:
+        try:
+            col = BaseRepository.select_one(  # type: ignore
+                db_tbl=VectorStoreInfo,
+                filters={"id": vectorstoreid},
+            )
+            if not col:
+                raise VectorStoreError(f"Vector Store '{vectorstoreid}' does not exist")
+            store_name = col["name"]
+            usecase_id_db = col["usecase_id"]
+            if usecase_id_db != usecase_id:
+                raise VectorStoreError(f"Vector Store '{vectorstoreid}' access issue")
+            logger.info(f"Auth success — Vector Store '{vectorstoreid}' belongs to usecase '{usecase_id}'")
+
+            vs_file_info = create_file_info_tbl_model(f"{store_name}_file_info")  # type: ignore
+            vs_chunks = create_chunks_tbl_model(f"{store_name}_chunks", dimensions=0)  # type: ignore
+
+            file_info_record = BaseRepository.select_one(
+                db_tbl=vs_file_info,
+                filters={"file_id": vectorstorefileid, "vs_id": vectorstoreid},
+                session_factory=create_session,
+            )
+            if not file_info_record:
+                raise VectorStoreError(f"File info '{store_name}' does not exist in vector store '{vectorstoreid}'")
+
+            chunks_record = BaseRepository.select_many(
+                db_tbl=vs_chunks,
+                filters={"file_id": vectorstorefileid},
+                session_factory=create_session,
+            )
+            if not chunks_record:
+                raise VectorStoreError(f"Chunks for '{store_name}' do not exist in vector store '{vectorstoreid}'")
+            text_chunks = [chunk["content"] for chunk in chunks_record if "content" in chunk]
+            vector_store_file = {
+                "file_id": file_info_record["file_id"],
+                "filename": file_info_record.get("file_name", ""),
+                "attributes": file_info_record.get("attributes", {}),
+                "content": text_chunks,
+            }
+            return self._response_to_object_retrieve_file(vector_store_file)
+        except DatabaseConnectionError as e:
+            logger.error(f"Database connection error while retrieving {vectorstorefileid}: {str(e)}")
+            raise
+        except VectorStoreError:
+            raise
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Unexpected error retrieving file {vectorstorefileid} from {vectorstoreid}: {str(e)}")
+            vector_store_file = {"file_id": vectorstoreid, "filename": "", "attributes": dict(), "content": []}
+            return self._response_to_object_retrieve_file(vector_store_file, exception=True)
+
+    async def list_stores(
+        self,
+        usecase_id: str,
+        limit: int = 50,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        order: str = "desc",
+    ) -> List[CreateVectorStoreResponse]:
+        vstore_svc = VectorStoreService(base_repository=BaseRepository(), base_model_ops=BaseModelOps())
+        v_stores_resp = await vstore_svc.get(usecase_id=usecase_id, orderby=order)
+        stores = []
+        for item in v_stores_resp.get("v_stores", []):
+            created_at = int(item["created_at"].timestamp()) if item.get("created_at") else 0
+            last_active_at = int(item["last_active_at"].timestamp()) if item.get("last_active_at") else 0
+            stores.append(
+                CreateVectorStoreResponse(
+                    id=str(item["id"]),
+                    created_at=created_at,
+                    name=item["name"],
+                    usage_bytes=item.get("usage_bytes", 0),
+                    file_counts=item.get("file_counts", FileCountsModel()).copy()
+                    if item.get("file_counts")
+                    else FileCountsModel(),
+                    status=VectorStoreStatus.COMPLETED.value,
+                    expires_after=item.get("expires_after"),
+                    last_active_at=last_active_at,
+                    metadata=item.get("metadata_vs"),
+                )
+            )
+
+        start_index = 0
+        end_index = len(stores)
+
+        if after:
+            after_indices = [i for i, store in enumerate(stores) if store.id == after]
+            if after_indices:
+                start_index = after_indices[0] + 1
+
+        if before:
+            before_indices = [i for i, store in enumerate(stores) if store.id == before]
+            if before_indices:
+                end_index = before_indices[0]
+                start_index = max(0, end_index - limit)
+                return stores[start_index:end_index]
+
+        return stores[start_index : start_index + limit]
+
+    async def search_vector_store(
+        self,
+        payload: SearchVectorStoreRequest,
+        store_id: str,
+        model_name: str,
+        context_length: int,
+        model_path: str,
+    ) -> SearchVectorStoreResponse:
+        internal_req = payload_to_internal_format(api_payload=payload, collection=store_id)
+        logger.info(f"Converted incoming search payload to internal format: {internal_req}")
+        return await self.search(internal_req, model_name, context_length, model_path)
+
+    async def fulltext_search(self, search_request: SearchRequest) -> list[SearchResult]:
+        _, results = self.document_repository.fulltext_search(
+            query=search_request.search_text,
+            search_terms=search_request.content_filter,
+            include_links=search_request.link_filter,
+            include_topics=search_request.topic_filter,
+            top_k=search_request.limit,
+            min_relevance_score=search_request.min_score,
+        )
+        return results
+
+    async def semantic_search(self, search_request: SearchRequest) -> list[SearchResult]:
+        embeddings = await self.embedding_service.get_embeddings(
+            model_name=self.settings.default_model_embeddings,
+            batch=[search_request.search_text],
+        )
+        query_vector = embeddings.data[0].embedding
+        _, results = self.document_repository.sematic_search(
+            query_vector=query_vector,
+            search_terms=search_request.content_filter,
+            include_links=search_request.link_filter,
+            include_topics=search_request.topic_filter,
+            top_k=search_request.limit,
+            min_similarity_score=search_request.min_score,
+        )
+        return results
+
+    async def hybrid_search(self, search_request: SearchRequest) -> list[SearchResult]:
+        semantic_results: list[SearchResult] = await self.semantic_search(search_request)
+        fulltext_results: list[SearchResult] = await self.fulltext_search(search_request)
+        logger.info(
+            f"Hybrid search -> Semantic search results: {len(semantic_results)}, "
+            f"Full-text search results: {len(fulltext_results)}"
+        )
+        score_map = defaultdict(lambda: {"semantic": 0.0, "fulltext": 0.0})  # type: ignore
+        result_map: Dict[str, SearchResult] = {}
+        for res in semantic_results:
+            score_map[res.file_id]["semantic"] = res.score
+            result_map[res.file_id] = res
+        for res in fulltext_results:
+            score_map[res.file_id]["fulltext"] = res.score
+            result_map.setdefault(res.file_id, res)
+        reranked: List[SearchResult] = []
+        for file_id_, scores in score_map.items():
+            weighted_score = round(0.6 * scores["semantic"] + 0.4 * scores["fulltext"], 4)
+            result = result_map[file_id_]
+            result.score = weighted_score
+            reranked.append(result)
+        reranked.sort(key=lambda r: r.score, reverse=True)
+        return reranked[: search_request.limit]
+
+    async def search(
+        self, search_request: SearchRequest, model_name: str, context_length: int, model_path: str
+    ) -> SearchVectorStoreResponse:
+        try:
+            search_results: List[SearchResult] = []
+            if search_request.search_type in (SearchType.SEMANTIC, SearchType.HYBRID):  # type: ignore
+                if getattr(search_request, "search_text", None):
+                    self._content_length_validation(
+                        context_length, model_name, model_path, search_request.search_text, "search"
+                    )
+            match search_request.search_type:
+                case SearchType.SEMANTIC:
+                    search_results = await self.semantic_search(search_request)  # type: ignore
+                case SearchType.FULL_TEXT:
+                    search_results = await self.fulltext_search(search_request)  # type: ignore
+                case SearchType.HYBRID:
+                    search_results = await self.hybrid_search(search_request)  # type: ignore
+            logger.info(f"Total searched document count {len(search_results)}")
+            return SearchVectorStoreResponse(search_query=search_request.search_text, data=search_results)
+        except (DatabaseConnectionError, DocumentMaxTokenLimitExceededError) as db_error:
+            raise db_error
+        except Exception as e:
+            logger.exception(f"Search failed for request {search_request}: {e}")
+            raise DocumentStoreSearchError(f"Unexpected error during search: {str(e)}")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/collection_service.py
 from sqlalchemy.exc import OperationalError
 
 from src.config import get_settings
@@ -5667,7 +8113,7 @@ from src.repository.base_repository import BaseRepository
 from src.repository.collection_ddl import CollectionDDL
 from src.repository.document_base_model import BaseModelOps
 from src.repository.document_repository import DocumentRepository
-from src.utility.collection_helpers import check_embedding_model
+from src.utility.vector_store_helpers import check_embedding_model
 
 logger = Logger.create_logger(__name__)
 settings = get_settings()
@@ -5751,7 +8197,7 @@ class CollectionService:
         except Exception as e:
             raise CollectionError(f"Failed to delete collection: {e}")
 
->> /genai_platform_services/src/services/vertexai_conversation_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/vertexai_conversation_service.py
 from typing import Optional
 
 from google.genai import Client, types
@@ -5811,7 +8257,7 @@ class VertexAIConversationService:
         )
         return response.text
 
->> /genai_platform_services/src/services/speech_services.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/speech_services.py
 import base64
 import time
 from typing import Any, Dict
@@ -5878,9 +8324,7 @@ class SpeechService:
             await self._debug_save(audio_base64, settings.tts_sample_rate, tts_request.text, "tts-data")
         return result  # type: ignore
 
->> /genai_platform_services/src/services/playground_chat_completion_service.py
-from collections import defaultdict
-
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/playground_chat_completion_service.py
 from fastapi import HTTPException
 from google.genai import types
 from google.genai.types import Part
@@ -5892,39 +8336,32 @@ from src.models.playground_chatcompletion_payload import (
     PlaygroundRequest,
     PlaygroundResponse,
 )
-from src.prompts import PLAYGROUND_SYSTEM_PROMPT
 from src.services.vertexai_conversation_service import VertexAIConversationService
 
 logger = Logger.create_logger(__name__)
 
 settings = get_settings()
 
-history: dict[str, list[types.Content]] = defaultdict(
-    lambda: [types.Content(role="user", parts=[Part.from_text(text=PLAYGROUND_SYSTEM_PROMPT)])])
-
 
 class PlaygroundChatCompletionService:
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = Logger.create_logger(__name__)
         self.vertexai_service: VertexAIConversationService = get_vertexai_service()
 
-    def process(self, session_id: str, request: PlaygroundRequest) -> PlaygroundResponse:
+    def process(self, session_id: str, request: PlaygroundRequest, chat_history: list) -> PlaygroundResponse:
         try:
             user_prompt = request.user_prompt
             urls = request.document_urls
-            chat_history = history[session_id]
-            logger.info(f"session_id: {session_id} chat_history: {chat_history}")
-            response = self.vertexai_service.invoke_llm(document_urls=urls,
-                                                        query=user_prompt,
-                                                        model=request.model_name.value,
-                                                        chat_history=chat_history)
+            response = self.vertexai_service.invoke_llm(
+                document_urls=urls or [], query=user_prompt, model=request.model_name.value, chat_history=chat_history
+            )
             chat_history.append(types.Content(role="model", parts=[Part.from_text(text=response)]))
             return PlaygroundResponse(content=response)
         except Exception as e:
             self.logger.error(f"Internal server error: {str(e)}")
             raise HTTPException(status_code=500, detail="Internal server error")
 
->> /genai_platform_services/src/services/tokenizer_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/tokenizer_service.py
 import os
 from urllib.parse import urlparse
 
@@ -5989,7 +8426,149 @@ class TokenizerService:
             object_path = parts[1] if len(parts) > 1 else None  # allow no object path
         return bucket, object_path
 
->> /genai_platform_services/src/services/pdf_processing_service.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/text_chunking_service.py
+import re
+from typing import List, Optional
+
+
+class TextChunker:
+    def __init__(self, chunk_size: int = 500, overlap: int = 50, recursion_limit: int = 10):
+        if overlap >= chunk_size:
+            raise ValueError("`overlap` must be smaller than `chunk_size`.")
+
+        self.chunk_size = chunk_size
+        self.overlap = overlap
+        self.recursion_limit = recursion_limit
+
+    def recursive_chunk(
+        self,
+        text: str,
+        separators: Optional[List[str]] = None,
+        depth: int = 0,
+    ) -> List[str]:
+        if not text.strip():
+            return []
+
+        if separators is None:
+            separators = ["\n\n", "\n", ". ", " "]
+
+        # Base case: within chunk size or recursion too deep
+        if len(text) <= self.chunk_size or depth >= self.recursion_limit:
+            return [text.strip()]
+
+        for sep in separators:
+            parts = text.split(sep)
+            if len(parts) == 1:
+                continue  # Try smaller separators
+
+            chunks = []
+            current_parts = []
+            current_length = 0
+
+            for part in parts:
+                part_len = len(part) + len(sep)
+                if current_length + part_len <= self.chunk_size:
+                    current_parts.append(part)
+                    current_length += part_len
+                else:
+                    if current_parts:
+                        chunks.append((sep.join(current_parts)).strip())
+                    current_parts = [part]
+                    current_length = len(part)
+
+            if current_parts:
+                chunks.append(sep.join(current_parts).strip())
+
+            # Recursively handle any oversized chunks
+            refined_chunks = []
+            for chunk in chunks:
+                if len(chunk) > self.chunk_size and len(separators) > 1:
+                    refined_chunks.extend(self.recursive_chunk(chunk, separators[1:], depth + 1))
+                else:
+                    refined_chunks.append(chunk)
+
+            # Apply overlap safely
+            return self._apply_overlap(refined_chunks)
+
+        # Fallback: fixed-size chunking
+        return self.fixed_chunk(text)
+
+    def fixed_chunk(self, text: str, separators: List[str] = None) -> List[str]:
+        if not text.strip():
+            return []
+
+        if separators is None:
+            separators = [".", "\n\n", " "]
+
+        # Combine separators into regex pattern
+        sep_pattern = "|".join(re.escape(sep) for sep in separators)
+        sentences = re.split(f"({sep_pattern})", text)
+
+        # Rebuild text with separators included properly
+        combined = []
+        current = ""
+        for part in sentences:
+            if not part:
+                continue
+            if len(current) + len(part) <= self.chunk_size:
+                current += part
+            else:
+                combined.append(current.strip())
+                current = part
+        if current:
+            combined.append(current.strip())
+
+        # Apply overlap (word-level)
+        overlapped_chunks = []
+        for i, chunk in enumerate(combined):
+            if i == 0:
+                overlapped_chunks.append(chunk)
+            else:
+                prev_words = combined[i - 1].split()[-self.overlap :] if self.overlap > 0 else []
+                current_chunk = " ".join(prev_words + chunk.split())
+                overlapped_chunks.append(current_chunk.strip())
+
+        return [c for c in overlapped_chunks if c]
+
+    def _apply_overlap(self, chunks: List[str]) -> List[str]:
+        """
+        Apply overlap between consecutive chunks while avoiding duplicate text
+        and mid-sentence cutoffs.
+
+        Args:
+            chunks (List[str]): Non-overlapping text chunks.
+
+        Returns:
+            List[str]: Overlapped chunks.
+        """
+        if not chunks:
+            return []
+
+        overlapped_chunks = [chunks[0]]
+
+        for i in range(1, len(chunks)):
+            prev_chunk = chunks[i - 1]
+            curr_chunk = chunks[i]
+
+            # Extract overlap region from previous chunk
+            overlap_region = prev_chunk[-self.overlap :].strip()
+
+            # Avoid repeating words if overlap already appears in the current chunk
+            if curr_chunk.lower().startswith(overlap_region.lower()):
+                # Perfect overlap already aligned — keep as-is
+                merged = curr_chunk
+            else:
+                # Try aligning overlap intelligently (avoid partial word duplication)
+                if " " in overlap_region:
+                    # Trim incomplete word at start
+                    overlap_region = overlap_region.split(" ", 1)[-1]
+                merged = f"{overlap_region} {curr_chunk}".strip()
+
+            overlapped_chunks.append(merged)
+
+        return overlapped_chunks
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/services/pdf_processing_service.py
 from src.chunkers.recursive_chunker import RecursiveChunker
 from src.models.storage_payload import Document
 from src.services.abstract_document_store import AbstractDocumentStore
@@ -6017,62 +8596,7 @@ class PdfProcessingService:
             await self.document_store.index(documents, collection)
         return total_size
 
->> /genai_platform_services/src/utility/collection_utils.py
-import re
-from typing import Optional, Tuple
-
-POSTGRES_RESERVED_KEYWORDS = {
-    "select",
-    "insert",
-    "update",
-    "delete",
-    "from",
-    "where",
-    "table",
-    "create",
-    "drop",
-    "alter",
-    "join",
-    "on",
-    "as",
-    "and",
-    "or",
-    "not",
-    "null",
-    "into",
-    "values",
-    "set",
-    "group",
-    "order",
-    "by",
-    "limit",
-    "having",
-    "distinct",
-    "union",
-    "all",
-    "case",
-    "when",
-    "then",
-    "else",
-    "end",
-}
-
-
-def is_valid_collection_name(name: str) -> Tuple[bool, Optional[str]]:
-    if not isinstance(name, str):
-        return False, "Table name must be a string."
-    if not name:
-        return False, "Table name cannot be empty."
-    if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]{0,62}", name):
-        return False, (
-            "Table name must start with a letter and can contain only letters, digits, or underscores. "
-            "Maximum length is 63 characters."
-        )
-    if name.lower() in POSTGRES_RESERVED_KEYWORDS:
-        return False, f"'{name}' is a reserved PostgreSQL keyword and cannot be used as a table name."
-    return True, None
-
->> /genai_platform_services/src/utility/registry.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/registry.py
 from collections.abc import Callable
 from typing import Any, Dict, List, Type
 
@@ -6121,59 +8645,9 @@ def create_registry_from_db(registry: Registry, dynamic_fields_list: List[dict])
         )
     return registry
 
->> /genai_platform_services/src/utility/collection_helpers.py
-import httpx
-from fastapi import HTTPException, status
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/__init__.py
 
-from src.config import get_settings
-from src.db.platform_meta_tables import CollectionInfo, EmbeddingModels
-from src.exception.exceptions import EmbeddingModelError
-from src.repository.base_repository import BaseRepository
-
-settings = get_settings()
-
-
-async def check_embedding_model(model_name: str) -> tuple[str, int, int]:
-    row = BaseRepository.select_one(db_tbl=EmbeddingModels, filters={"model_name": model_name})
-    if not row:
-        raise EmbeddingModelError(f"Embedding model name '{model_name}' not found.")
-    return str(row["model_path"]), int(row["dimensions"]), int(row["context_length"])
-
-
-async def validate_collection_access(api_key: str, collection_name: str):
-    validation_url = f"{settings.prompt_hub_endpoint}{settings.prompt_hub_get_usecase_by_apikey}"
-    verify = settings.deployment_env == "PROD"
-    async with httpx.AsyncClient(verify=verify) as client:
-        resp = await client.get(validation_url, headers={"lite-llm-api-key": api_key})
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
-    data = resp.json()["data"]
-    # use_case_id is team_id
-    use_case_id = data["team_id"]
-    col = BaseRepository.select_one(db_tbl=CollectionInfo, filters={"collection_name": collection_name})
-    if not col:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Collection '{collection_name}' not found in DB.",
-        )
-    if str(col["usecase_id"]) != use_case_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not authorized for this collection.")
-    return col["model_name"]
-
-
-async def get_usecase_id_by_api_key(api_key: str):
-    validation_url = f"{settings.prompt_hub_endpoint}{settings.prompt_hub_get_usecase_by_apikey}"
-    verify = settings.deployment_env == "PROD"
-    async with httpx.AsyncClient(verify=verify) as client:
-        resp = await client.get(validation_url, headers={"lite-llm-api-key": api_key})
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
-    data = resp.json()["data"]
-    # use_case_id is team_id
-    use_case_id = data["team_id"]
-    return use_case_id
-
->> /genai_platform_services/src/utility/registry_initializer.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/registry_initializer.py
 import ast
 from typing import Any, Dict, Tuple
 
@@ -6225,7 +8699,7 @@ def convert_dynamic_fields(input_fields: Dict[str, Dict[str, Any]]) -> Dict[str,
         for field_name, props in input_fields.items()
     }
 
->> /genai_platform_services/src/utility/utils.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/utils.py
 import httpx
 from fastapi import HTTPException
 
@@ -6324,11 +8798,10 @@ async def fetch_prompt_by_prompt_name(
 
     return await _fetch_prompt(endpoint, headers_tuple, prompt_name, params_tuple, settings.verify)
 
->> /genai_platform_services/src/utility/guardrails.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/guardrails.py
 from typing import Any, Dict, NoReturn, cast
 
 import httpx
-from async_lru import alru_cache
 from fastapi import HTTPException, status
 from httpx import RemoteProtocolError, RequestError, Response, UnsupportedProtocol
 
@@ -6365,33 +8838,12 @@ def _handle_transport_error(err_type: str, exc: Exception) -> NoReturn:
 
 async def _post_json(url: str, payload: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
     try:
-        logger.debug(f"Guardrails Payload: {payload}")
-        async with httpx.AsyncClient(verify=settings.verify, timeout=settings.guardrails_timeout) as client:
+        async with httpx.AsyncClient(verify=settings.verify, timeout=60) as client:
             resp: Response = await client.post(url, headers=headers, json=payload)
             logger.info(f"Guardrails Response: {resp.json()}")
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail=resp.json())
             return cast(Dict[str, Any], resp.json())
-
-    except RemoteProtocolError as exc:
-        _handle_transport_error("RemoteProtocolError", exc)
-    except UnsupportedProtocol as exc:
-        _handle_transport_error("UnsupportedProtocol", exc)
-    except RequestError as exc:
-        _handle_transport_error("RequestError", exc)
-
-
-@alru_cache()
-async def _get_json_cached(url: str, token: str) -> str:
-    try:
-        async with httpx.AsyncClient(verify=settings.verify, timeout=settings.guardrails_timeout) as client:
-            resp: Response = await client.get(url, headers={"Authorization": token})
-            if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail=resp.json())
-            result = resp.json()
-            uc_data = result.get("data", {})
-            llmteamid = uc_data.get("llmTeamId", None)
-            return cast(str, llmteamid)
 
     except RemoteProtocolError as exc:
         _handle_transport_error("RemoteProtocolError", exc)
@@ -6408,17 +8860,14 @@ async def scan_prompt(
     token: str | None = None,
     api_call_type: str | None = None,
     guardrail_id: str | None = None,
-    usecase_id: str | None = None,
 ) -> Dict[str, Any]:
     payload = {"prompt": prompt}
     if guardrail_id is not None:
         payload["guardrail_id"] = str(guardrail_id)
 
-    if api_call_type == "internal":
-        prompt_hub_url = f"{settings.prompt_hub_endpoint}{settings.promt_hub_get_usecase_by_token}{usecase_id}"
-        llmteamid = await _get_json_cached(prompt_hub_url, token)
-        payload["team_id"] = llmteamid
+    logger.debug(f"Guardrails Payload: {payload}")
 
+    if api_call_type == "internal":
         url = f"{settings.guardrails_endpoint}{settings.guardrails_prompt_analyze_internal_api}"
         logger.info(f"Guardrails Prompt analyse endpoint: {url}")
         return await _post_json(url, payload, _build_int_headers(session_id, token))  # type: ignore
@@ -6436,17 +8885,13 @@ async def scan_output(
     token: str | None = None,
     api_call_type: str | None = None,
     guardrail_id: str | None = None,
-    usecase_id: str | None = None,
 ) -> Dict[str, Any]:
     payload = {"prompt": input_prompt, "output": output}
     if guardrail_id is not None:
         payload["guardrail_id"] = str(guardrail_id)
 
+    logger.debug(f"Guardrails Payload: {payload}")
     if api_call_type == "internal":
-        prompt_hub_url = f"{settings.prompt_hub_endpoint}{settings.promt_hub_get_usecase_by_token}{usecase_id}"
-        llmteamid = await _get_json_cached(prompt_hub_url, token)
-        payload["team_id"] = llmteamid
-
         url = f"{settings.guardrails_endpoint}{settings.guardrails_output_analyze_internal_api}"
         logger.info(f"Guardrails Output analyse endpoint: {url}")
         return await _post_json(url, payload, _build_int_headers(session_id, token))  # type: ignore
@@ -6455,7 +8900,69 @@ async def scan_output(
         logger.info(f"Guardrails Prompt analyse endpoint: {url}")
         return await _post_json(url, payload, _build_ext_headers(session_id, guardrail_api_key))
 
->> /genai_platform_services/src/utility/dynamic_model_utils.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/vector_store_helpers.py
+from typing import Any
+
+import httpx
+from fastapi import HTTPException, status
+
+from src.config import get_settings
+from src.db.platform_meta_tables import CollectionInfo, EmbeddingModels, VectorStoreInfo
+from src.exception.exceptions import EmbeddingModelError
+from src.repository.base_repository import BaseRepository
+
+settings = get_settings()
+
+
+async def check_embedding_model(model_name: str) -> tuple[str, int, int]:
+    row = BaseRepository.select_one(db_tbl=EmbeddingModels, filters={"model_name": model_name})  # type: ignore
+    if not row:
+        raise EmbeddingModelError(f"Embedding model name '{model_name}' not found.")
+    required_keys = {"model_path", "dimensions", "context_length"}
+    missing = required_keys - row.keys()
+    if missing:
+        raise EmbeddingModelError(f"Embedding model '{model_name}' is missing fields: {', '.join(missing)}")
+    return str(row["model_path"]), int(row["dimensions"]), int(row["context_length"])
+
+
+async def _fetch_usecase_info(api_key: str) -> Any:
+    validation_url = f"{settings.prompt_hub_endpoint}{settings.prompt_hub_get_usecase_by_apikey}"
+    verify = settings.deployment_env == "PROD"
+    async with httpx.AsyncClient(verify=verify) as client:
+        resp = await client.get(validation_url, headers={"lite-llm-api-key": api_key})
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or unauthorized API key")
+
+    try:
+        data = resp.json().get("data", {})
+        return data["team_id"]
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(status_code=502, detail="Malformed response from Prompt Hub")
+
+
+async def validate_store_access(api_key: str, vector_store: str, service_type: str = "collection") -> Any:
+    # use_case_id is team_id
+    use_case_id = await _fetch_usecase_info(api_key)
+    if service_type == "collection":
+        col = BaseRepository.select_one(  # type: ignore
+            db_tbl=CollectionInfo, filters={"collection_name": vector_store}
+        )  # TODO - Remove
+    else:
+        col = BaseRepository.select_one(db_tbl=VectorStoreInfo, filters={"id": vector_store})  # type: ignore
+    if not col:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Vector Store '{vector_store}' not found in DB.",
+        )
+    if str(col["usecase_id"]) != use_case_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not authorized for this collection.")
+    return col["model_name"]
+
+
+async def get_usecase_id_by_api_key(api_key: str) -> Any:
+    return await _fetch_usecase_info(api_key)
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/dynamic_model_utils.py
 import re
 import uuid
 from datetime import datetime
@@ -6552,7 +9059,7 @@ def create_dynamic_document_model(class_name: str, dynamic_fields: dict) -> type
 
     return type(class_name, (Base,), columns)
 
->> /genai_platform_services/src/utility/file_io.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/file_io.py
 import base64
 import os
 import uuid
@@ -6616,7 +9123,7 @@ class FileIO:
             return False
         return True
 
->> /genai_platform_services/src/utility/pdf_helpers.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/pdf_helpers.py
 import json
 import os
 
@@ -6644,7 +9151,7 @@ def get_markdown_from_pdf(file_path: str) -> str:
     else:
         return ""
 
->> /genai_platform_services/src/utility/url_utils.py
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/url_utils.py
 import re
 
 from fastapi import HTTPException
@@ -6657,6 +9164,246 @@ def detect_document_type(url: str) -> str:
         return "image/jpeg"
     else:
         raise HTTPException(status_code=404, detail="Document type not supported. Please upload only pdf/jpeg/jpg/png")
+
+>> /Users/epfn119476/Documents/HDFC/genai_platform_services/src/utility/vector_store_utils.py
+from __future__ import annotations
+
+import re
+import sys
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Type, TypeVar, Union
+
+from pgvector.sqlalchemy import Vector  # type: ignore
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
+
+from src.config import get_settings
+from src.db.base import BaseDBA
+from src.models.storage_payload import SearchRequest
+from src.models.vector_store_payload import SearchType, StorageBackend
+
+settings = get_settings()
+
+T = TypeVar("T", bound=BaseDBA)
+
+POSTGRES_RESERVED_KEYWORDS = {
+    "select",
+    "insert",
+    "update",
+    "delete",
+    "from",
+    "where",
+    "table",
+    "create",
+    "drop",
+    "alter",
+    "join",
+    "on",
+    "as",
+    "and",
+    "or",
+    "not",
+    "null",
+    "into",
+    "values",
+    "set",
+    "group",
+    "order",
+    "by",
+    "limit",
+    "having",
+    "distinct",
+    "union",
+    "all",
+    "case",
+    "when",
+    "then",
+    "else",
+    "end",
+}
+
+
+def is_valid_name(name: str) -> Tuple[bool, Optional[str]]:
+    if not isinstance(name, str):
+        return False, "Table name must be a string."  # type: ignore
+    if not name:
+        return False, "Table name cannot be empty."
+    if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]{0,62}", name):
+        return False, (
+            "Table name must start with a letter and can contain only letters, digits, or underscores. "
+            "Maximum length is 63 characters."
+        )
+    if name.lower() in POSTGRES_RESERVED_KEYWORDS:
+        return False, f"'{name}' is a reserved PostgreSQL keyword and cannot be used as a table name."
+    return True, None
+
+
+def get_deepsize(obj: list, seen=None) -> int:  # type: ignore
+    """
+    Recursively compute the size of *obj* (including nested containers).
+    Used only when indexing files – logic is unchanged.
+    """
+    if seen is None:
+        seen = set()
+
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0
+    seen.add(obj_id)
+
+    size = sys.getsizeof(obj)
+
+    if isinstance(obj, dict):  # type: ignore
+        size += sum(get_deepsize(k, seen) + get_deepsize(v, seen) for k, v in obj.items())  # type: ignore
+    elif isinstance(obj, (list, tuple, set, frozenset)):
+        size += sum(get_deepsize(item, seen) for item in obj)
+
+    return size
+
+
+def create_file_info_tbl_model(table_name: str) -> Type[T]:
+    attrs = {
+        "__tablename__": table_name,
+        "__table_args__": {"extend_existing": True},  # Use extend_existing if table already exists
+        "vs_id": Column(UUID(as_uuid=True), primary_key=True, nullable=False),
+        "file_id": Column(UUID(as_uuid=True), primary_key=True, nullable=False),
+        "file_name": Column(String(255), nullable=False),
+        "file_version": Column(Integer, nullable=False),
+        "created_at": Column(DateTime, nullable=False, server_default=func.now()),
+        "last_error": Column(Text, nullable=True),
+        "usage_bytes": Column(BigInteger, nullable=False, server_default="0"),
+        "chunking_strategy": Column(String(255), nullable=False),
+        "metadata_vs": Column(JSONB, nullable=True),
+        "attributes": Column(JSONB, nullable=True),
+        "active": Column(Boolean, nullable=False, server_default="true"),
+        "status": Column(String(32), nullable=False),
+    }
+    return type(f"Dynamic_{table_name}", (BaseDBA,), attrs)
+
+
+def create_chunks_tbl_model(table_name: str, dimensions: int) -> Type[T]:
+    attrs = {
+        "__tablename__": table_name,
+        "__table_args__": {"extend_existing": True},
+        "id": Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()),
+        "file_id": Column(UUID(as_uuid=True), nullable=False),
+        "file_name": Column(String(255), nullable=False),
+        "embedding": Column(Vector(dimensions), nullable=False),
+        "content": Column(Text, nullable=False),
+        "links": Column(ARRAY(String), nullable=True),
+        "topics": Column(ARRAY(String), nullable=True),
+        "author": Column(String, nullable=True),
+        "meta_data": Column(JSONB, nullable=True),
+        "search_vector": Column(TSVECTOR, nullable=True),
+    }
+    return type(f"Dynamic_{table_name}", (BaseDBA,), attrs)
+
+
+def _extract_filters(
+    filt: Union[Dict[str, Any], List[Any]],
+    content: List[str],
+    link: List[str],
+    topic: List[str],
+) -> None:
+    if isinstance(filt, list):
+        for item in filt:
+            _extract_filters(item, content, link, topic)
+        return
+
+    if not isinstance(filt, Mapping):
+        # Anything that is not a dict/list is ignored
+        return  # type: ignore
+
+    # ---------- ComparisonFilter ----------
+    if "key" in filt and "value" in filt:
+        key = filt["key"]
+        val = str(filt["value"])  # always store as string
+        if key == "content":
+            content.append(val)
+        elif key == "link":
+            link.append(val)
+        elif key == "topic":
+            topic.append(val)
+        # other keys are ignored (they are not part of SearchRequest)
+        return
+
+    # ---------- CompoundFilter ----------
+    inner = filt.get("filters")
+    if inner is not None:
+        _extract_filters(inner, content, link, topic)
+    # otherwise ignore
+
+
+def _to_plain_dict(payload: Any) -> Dict[str, Any]:
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump()  # type: ignore
+    if isinstance(payload, dict):
+        return payload
+    return dict(payload)
+
+
+def payload_to_internal_format(
+    api_payload: Any,
+    *,
+    collection: str,
+) -> SearchRequest:
+    payload = _to_plain_dict(api_payload)
+    query = payload.get("query")
+    if isinstance(query, list):
+        search_text = query[0] if query else ""
+    else:
+        search_text = query or ""
+
+    limit: int = payload.get("max_num_results", settings.default_document_limit)
+
+    ranking = payload.get("ranking_options")
+    min_score: float = (
+        ranking.get("score_threshold")
+        if ranking and ranking.get("score_threshold") is not None
+        else settings.min_similarity_score
+    )
+    use_ranking: bool | None = None
+    if ranking and "ranker" in ranking:
+        use_ranking = ranking["ranker"] == "auto"
+
+    content_filter: List[str] | None = None
+    link_filter: List[str] | None = None
+    topic_filter: List[str] | None = None
+
+    raw_filters = payload.get("filters")
+    if raw_filters:
+        content_filter = []
+        link_filter = []
+        topic_filter = []
+        _extract_filters(raw_filters, content_filter, link_filter, topic_filter)
+
+        if not content_filter:
+            content_filter = None
+        if not link_filter:
+            link_filter = None
+        if not topic_filter:
+            topic_filter = None
+
+    return SearchRequest(
+        collection=collection,
+        search_type=SearchType(payload["search_type"]),
+        storage_backend=StorageBackend(payload["storage_backend"]),
+        search_text=search_text,
+        content_filter=content_filter,
+        link_filter=link_filter,
+        topic_filter=topic_filter,
+        limit=limit,
+        min_score=min_score,
+        use_ranking=use_ranking,
+    )
 
 -----------------------------------
 Sample CURL Requests and Responses:
