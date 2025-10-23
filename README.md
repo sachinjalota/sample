@@ -9548,15 +9548,11 @@ Elasticsearch Details from the DEVOPS Team:
 --------------------------------------
 For Kibana UI:  
  https://localhost:8080/app/home#/  
- ssh -L 8080:localhost:8080 hdfcbank@10.216.70.205  
+ ssh -L 8081:localhost:8081 hdfcbank@10.216.70.205  
 
 For Elasticsearch UI:  
- ssh -L 9090:localhost:9090 hdfcbank@10.216.70.205  
- http://localhost:9090/  
-
-Note: The Elasticsearch pods are running in a namespace. You can also access Elasticsearch at:  
- localhost:9200  
-
+ ssh -L 8080:localhost:8080 hdfcbank@10.216.70.205  
+ http://localhost:9090/
 --------------------------
 Answer Format Requirement:
 --------------------------
