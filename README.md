@@ -1,96 +1,292 @@
-# src/db/platform_meta_tables.py - ADD THESE TABLES
+>> src/models/rag_payload.py
+from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.sql import func
-import enum
+from openai.types.chat.chat_completion import ChatCompletion
+from pydantic import BaseModel, Field, field_validator
 
-class JobStatus(str, enum.Enum):
-    QUEUED = "queued"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    PARTIAL_FAILURE = "partial_failure"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+from src.config import get_settings
+from src.models.storage_payload import SearchType, StorageBackend
+from src.prompts.default_prompts import DEFAULT_RAG_SYSTEM_PROMPT
 
-class FileTaskStatus(str, enum.Enum):
-    QUEUED = "queued"
-    EXTRACTING = "extracting"
-    CHUNKING = "chunking"
-    EMBEDDING = "embedding"
-    INDEXING = "indexing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    RETRY_PENDING = "retry_pending"
-
-class BatchUploadJob(BaseDBA):
-    """Tracks batch file upload jobs"""
-    __tablename__ = "batch_upload_jobs"
-    
-    job_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    vector_store_id = Column(UUID(as_uuid=True), nullable=False)
-    usecase_id = Column(String(100), nullable=False)
-    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=False), onupdate=func.now())
-    status = Column(Enum(JobStatus), nullable=False, default=JobStatus.QUEUED)
-    
-    # Summary counts
-    total_files = Column(Integer, nullable=False, default=0)
-    files_queued = Column(Integer, nullable=False, default=0)
-    files_processing = Column(Integer, nullable=False, default=0)
-    files_completed = Column(Integer, nullable=False, default=0)
-    files_failed = Column(Integer, nullable=False, default=0)
-    
-    # Metadata
-    storage_backend = Column(String(50), nullable=False)
-    embedding_model = Column(String(255), nullable=False)
-    chunking_strategy = Column(JSONB, nullable=True)
-    
-    # Error tracking
-    error_summary = Column(JSONB, nullable=True)  # {file_id: error_msg}
+settings = get_settings()
 
 
-class FileProcessingTask(BaseDBA):
-    """Tracks individual file processing tasks"""
-    __tablename__ = "file_processing_tasks"
-    
-    task_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id = Column(UUID(as_uuid=True), ForeignKey("batch_upload_jobs.job_id"), nullable=False)
-    file_id = Column(UUID(as_uuid=True), nullable=False, unique=True)
-    file_name = Column(String(255), nullable=False)
-    gcs_path = Column(String(512), nullable=False)
-    
-    # Status tracking
-    status = Column(Enum(FileTaskStatus), nullable=False, default=FileTaskStatus.QUEUED)
-    current_phase = Column(String(50), nullable=True)  # Human-readable phase
-    retry_count = Column(Integer, nullable=False, default=0)
-    
-    # Timestamps
-    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
-    started_at = Column(DateTime(timezone=False), nullable=True)
-    completed_at = Column(DateTime(timezone=False), nullable=True)
-    
-    # Intermediate data storage (for retry)
-    extracted_text = Column(Text, nullable=True)  # Store on extraction success
-    
-    # Results
-    chunks_count = Column(Integer, nullable=True)
-    usage_bytes = Column(BigInteger, nullable=True)
-    
-    # Error handling
-    error_message = Column(Text, nullable=True)  # User-friendly error
-    error_details = Column(JSONB, nullable=True)  # Technical details
-    
-    # Version tracking
-    file_version = Column(Integer, nullable=False, default=1)
+class RAGRequest(BaseModel):
+    guardrail_id: Optional[str] = Field(
+        ...,
+        description="Optional guardrail ID to validate the prompt or response against specific rules.",
+    )
+    system_prompt: str = Field(
+        default=DEFAULT_RAG_SYSTEM_PROMPT,
+        description="System prompt for LLM",
+    )
+    collection: str = Field(..., description="ID of the table or collection to search in.")
+    search_type: SearchType = Field(..., description="Type of search: semantic, full_text, or hybrid.")
+
+    storage_backend: StorageBackend = Field(
+        ...,
+        description="Specifies the storage backend to use (e.g., PGVector, ElasticSearch). Currently, only PGVector is supported.",
+    )
+    query: str = Field(..., description="The query text for semantic search.")
+
+    content_filter: Optional[list[str]] = Field(
+        default=None, description="Include these keywords/terms at time of search(apply on content column)"
+    )
+
+    link_filter: Optional[list[str]] = Field(
+        default=None, description="Include these links at time of search(apply on link column)"
+    )
+
+    topic_filter: Optional[list[str]] = Field(
+        default=None, description="Include these topics at time of search(apply on topic column)"
+    )
+
+    limit: int = Field(
+        default=settings.default_document_limit,
+        ge=0,
+        description="Maximum number of documents include in the LLM Context",
+    )
+
+    min_score: float = Field(
+        default=settings.min_similarity_score,
+        ge=0,
+        description="Minimum similarity score (for semantic and hybrid searches).",
+    )
+
+    model_name: str = Field(
+        default=settings.default_model,
+        description="The name of the model to use for generating response",
+    )
+
+    @field_validator("collection")
+    def collection_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("The 'collection' field must not be empty.")
+        return v
+
+    @field_validator("query")
+    def search_text_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("The 'query' field must not be empty.")
+        return v
 
 
-class CeleryTaskTracking(BaseDBA):
-    """Optional: Track Celery task IDs for monitoring"""
-    __tablename__ = "celery_task_tracking"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    file_task_id = Column(UUID(as_uuid=True), ForeignKey("file_processing_tasks.task_id"), nullable=False)
-    celery_task_id = Column(String(255), nullable=False, unique=True)
-    task_name = Column(String(255), nullable=False)  # e.g., "extract_pdf", "generate_embeddings"
-    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+class RAGResponse(BaseModel):
+    llm_response: ChatCompletion = Field(
+        ..., description="The response generated by the language model, including message content and metadata."
+    )
+    context: list[dict] = Field(
+        ..., description="List of relevant source documents or passages used to generate the LLM response."
+    )
+
+>> src/api/routers/rag_router.py
+from fastapi import APIRouter, Depends, status
+
+from src.api.deps import get_openai_service, validate_headers_and_api_key
+from src.config import get_settings
+from src.exception.document_store_exception import UnsupportedStorageBackendError
+from src.exception.rag_exception import RAGError
+from src.integrations.open_ai_sdk import OpenAISdk
+from src.logging_config import Logger
+from src.models.headers import HeaderInformation
+from src.models.rag_payload import RAGRequest, RAGResponse
+from src.models.storage_payload import StorageBackend
+from src.repository.document_repository import DocumentRepository
+from src.services.embedding_service import EmbeddingService
+from src.services.pgvector_document_store import PGVectorDocumentStore
+from src.services.rag_service import RAGService
+from src.utility.guardrails import scan_prompt
+from src.utility.vector_store_helpers import (
+    check_embedding_model,
+    validate_store_access,
+)
+
+router = APIRouter()
+logger = Logger.create_logger(__name__)
+settings = get_settings()
+
+
+@router.post(
+    f"{settings.rag_endpoint}",
+    summary="Query the RAG system for a contextual, knowledge-grounded response.",
+    description=(
+        "Processes a user query using Retrieval-Augmented Generation (RAG), combining language model generation "
+        "with relevant context retrieved from the document store. The system performs semantic search to identify relevant documents, "
+        "then uses them as grounding context to generate a more accurate and context-aware response using a large language model."
+    ),
+    response_description="A language model response enriched with retrieved contextual knowledge.",
+    response_model=RAGResponse,
+    status_code=status.HTTP_200_OK,
+)
+# @opik.track
+async def rag(
+    request: RAGRequest,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    open_ai_sdk: OpenAISdk = Depends(get_openai_service),
+) -> RAGResponse:
+    logger.info(f"RAG Request {request} from {header_information.x_session_id}")
+    model_name = await validate_store_access(header_information.x_base_api_key, request.collection)
+    model_path, embedding_dimensions, context_length = await check_embedding_model(model_name=model_name)
+    if settings.guardrail_enabled:
+        logger.info("Guardrails enabled. Validating user query...")
+        scan_args = {
+            "prompt": request.query,
+            "session_id": header_information.x_session_id,
+            "api_key": header_information.x_base_api_key,
+        }
+
+        if request.guardrail_id:
+            scan_args["guardrail_id"] = request.guardrail_id
+
+        guardrail_result = await scan_prompt(**scan_args)  # type: ignore
+        logger.warning(f"Guardrails result: {guardrail_result}")
+        if not guardrail_result.get("is_valid", False):
+            logger.warning(f"Guardrails validation failed: {guardrail_result}")
+            raise RAGError(
+                "Your query could not be processed as it violates certain safety or quality guidelines. Please revise your query to ensure it adheres to appropriate guidelines and try again."
+            )
+    if request.storage_backend.lower() == StorageBackend.PGVECTOR.value:
+        embedding_service = EmbeddingService(open_ai_sdk)
+        document_repository = DocumentRepository(request.collection, embedding_dimensions=embedding_dimensions)
+        pgvector_document_store = PGVectorDocumentStore(
+            embedding_service=embedding_service,
+            document_repository=document_repository,
+        )
+        rag_service = RAGService(document_store=pgvector_document_store, open_ai_sdk=open_ai_sdk)
+        return await rag_service.process(
+            session_id=header_information.x_session_id,  # type: ignore
+            api_key=header_information.x_base_api_key,
+            rag_request=request,
+            model_name=model_name,
+            context_length=context_length,
+            model_path=model_path,
+        )
+    else:
+        raise UnsupportedStorageBackendError(f"Unsupported storage backend: {request.storage_backend}")
+
+>> src/services/rag_service.py
+import time
+import uuid
+
+from openai.types.chat import ChatCompletion
+
+from src.exception.document_store_exception import DocumentMaxTokenLimitExceededError
+from src.exception.rag_exception import RAGError, RAGResponseGenerationError
+from src.integrations.open_ai_sdk import OpenAISdk
+from src.logging_config import Logger
+from src.models.completion_payload import ChatCompletionRequest
+from src.models.rag_payload import RAGRequest, RAGResponse
+from src.models.storage_payload import SearchRequest, SearchResponse
+from src.services.abstract_document_store import AbstractDocumentStore
+
+logger = Logger.create_logger(__name__)
+
+
+class RAGService:
+    def __init__(self, document_store: AbstractDocumentStore, open_ai_sdk: OpenAISdk) -> None:
+        self.document_store = document_store
+        self.open_ai_sdk = open_ai_sdk
+
+    async def process(self, session_id: str, api_key: str,
+                      rag_request: RAGRequest,
+                      model_name: str,
+                      context_length: int,
+                      model_path: str
+                      ) -> RAGResponse:
+        try:
+            search_request = SearchRequest(
+                collection=rag_request.collection,
+                content_filter=rag_request.content_filter,
+                topic_filter=rag_request.topic_filter,
+                link_filter=rag_request.link_filter,
+                search_text=rag_request.query,
+                limit=rag_request.limit,
+                min_score=rag_request.min_score,
+                search_type=rag_request.search_type,
+                storage_backend=rag_request.storage_backend,
+            )
+
+            search_response: SearchResponse = await self.document_store.search(search_request, model_name,
+                                                                               context_length, model_path)
+
+            logger.info(f"Search response count: {search_response.total}")
+            if len(search_response.results) < 1:
+                logger.info(f"No documents found in collection {rag_request.collection} for query {rag_request.query}")
+                placeholder_response = ChatCompletion(
+                    id=str(uuid.uuid4()),
+                    created=int(time.time()),
+                    object="chat.completion",
+                    model=rag_request.model_name,
+                    choices=[
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {
+                                "role": "assistant",
+                                "content": "No documents were found matching your query. Please consider revising your query or verifying the input provided.",
+                            },
+                        }
+                    ],
+                )
+                return RAGResponse(llm_response=placeholder_response, context=[])
+            retrieved_data = list(map(lambda result: result.source["content"], search_response.results))
+            usr_context_data = list(
+                map(
+                    lambda result: {
+                        "content": result.source.get("content"),
+                        "links": result.source.get("links"),
+                        "topics": result.source.get("topics"),
+                        "author": result.source.get("author"),
+                        "meta_data": result.source.get("meta_data"),
+                    },
+                    search_response.results,
+                )
+            )
+
+            request = ChatCompletionRequest(
+                user_prompt=rag_request.query,
+                model_name=rag_request.model_name,
+                guardrail_id=rag_request.guardrail_id,
+            )
+            response = await self._llm_invoke(
+                session_id=session_id,
+                system_prompt=rag_request.system_prompt,
+                api_key=api_key,
+                context=retrieved_data,
+                request=request,
+            )
+            logger.info(f"RAG response {response}")
+            return RAGResponse(llm_response=response, context=usr_context_data)
+        except DocumentMaxTokenLimitExceededError as e:
+            raise e
+        except RAGError as rag_error:
+            raise rag_error
+        except Exception as e:
+            logger.exception(f"RAG failed for table {rag_request.collection} and query {rag_request.query}")
+            raise RAGError(f"Unexpected error : {str(e)}")
+
+    async def _llm_invoke(
+            self,
+            session_id: str,
+            system_prompt: str,
+            api_key: str,
+            context: list[str],
+            request: ChatCompletionRequest,
+    ) -> ChatCompletion:
+        try:
+            context_data = "\n".join(context)
+            system_prompt_with_context = f"{system_prompt} \n {context_data}"
+
+            logger.info(f"system_prompt_with_context:   {system_prompt_with_context}")
+            response = await self.open_ai_sdk.complete(
+                request=request,
+                system_prompt=system_prompt_with_context,
+                session_id=session_id,
+                api_key=api_key,
+            )
+            return response
+        except Exception as e:
+            logger.exception(
+                f"LLM failed to generate response  for table {request.user_prompt} system prompt {system_prompt} context data{context}"
+            )
+            raise RAGResponseGenerationError(f"Unexpected error during LLM call: {str(e)}")
