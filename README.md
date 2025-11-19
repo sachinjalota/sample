@@ -1,34 +1,82 @@
-# src/celery_tasks/file_processing.py - UPDATE ERROR HANDLING
+# src/celery_tasks/monitoring.py - NEW FILE
 
-from src.utility.error_messages import get_user_friendly_error
+"""
+Placeholder for Opik/observability integration
+To be activated in future
+"""
 
-# In extract_file_content task, update exception handling:
-except SoftTimeLimitExceeded:
-    error_msg = get_user_friendly_error("extraction", "timeout")
-    logger.error(f"[Task {task_id}] Extraction timeout")
-    update_task_status(
-        task_id,
-        FileTaskStatus.FAILED,
-        error_message=error_msg,
-        error_details={"stage": "extraction", "reason": "timeout", "technical": "SoftTimeLimitExceeded"}
-    )
-    update_job_summary(task_context["job_id"])
-    raise
+from typing import Any, Dict, Optional
+from src.config import get_settings
 
-except ValueError as e:
-    if "empty" in str(e).lower():
-        error_msg = get_user_friendly_error("extraction", "empty_content")
-    else:
-        error_msg = get_user_friendly_error("extraction", "corrupted", str(e))
+settings = get_settings()
+
+class CeleryTaskMonitor:
+    """
+    Placeholder for task monitoring integration
     
-    logger.error(f"[Task {task_id}] {error_msg}")
-    update_task_status(
-        task_id,
-        FileTaskStatus.FAILED,
-        error_message=error_msg,
-        error_details={"stage": "extraction", "exception": str(e)}
-    )
-    update_job_summary(task_context["job_id"])
-    raise
+    Future integrations:
+    - Opik traces
+    - Prometheus metrics
+    - Custom dashboards
+    """
+    
+    @staticmethod
+    def track_task_start(task_id: str, task_name: str, context: Dict[str, Any]) -> Optional[str]:
+        """
+        Track task start event
+        
+        # TODO: Integrate with Opik
+        # from opik import track
+        # trace_id = track.start_trace(
+        #     name=task_name,
+        #     metadata=context
+        # )
+        # return trace_id
+        """
+        pass
+    
+    @staticmethod
+    def track_task_end(task_id: str, trace_id: str, result: Any, error: Optional[Exception] = None) -> None:
+        """
+        Track task completion/failure
+        
+        # TODO: Integrate with Opik
+        # from opik import track
+        # track.end_trace(
+        #     trace_id=trace_id,
+        #     result=result,
+        #     error=error
+        # )
+        """
+        pass
+    
+    @staticmethod
+    def log_metric(metric_name: str, value: float, tags: Dict[str, str] = None) -> None:
+        """
+        Log custom metrics
+        
+        # TODO: Integrate with Prometheus
+        # from prometheus_client import Counter, Histogram
+        # metric.observe(value)
+        """
+        pass
 
-# Similar pattern for other tasks...
+
+# Usage in tasks (commented out for now):
+# from src.celery_tasks.monitoring import CeleryTaskMonitor
+# 
+# @celery_app.task(bind=True)
+# def some_task(self, context):
+#     # trace_id = CeleryTaskMonitor.track_task_start(
+#     #     task_id=context["task_id"],
+#     #     task_name="extract_pdf",
+#     #     context=context
+#     # )
+#     
+#     try:
+#         # ... task logic ...
+#         # CeleryTaskMonitor.track_task_end(task_id, trace_id, result)
+#         pass
+#     except Exception as e:
+#         # CeleryTaskMonitor.track_task_end(task_id, trace_id, None, e)
+#         raise
