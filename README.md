@@ -1,4 +1,4 @@
-1. File Structure
+## 1. File Structure
 /genai_platform_services/
 ├── src/
 │   ├── celery_app.py          # NEW
@@ -14,7 +14,7 @@
 ├── pyproject.toml             # MODIFY
 └── ...
 
-2. Updated Dockerfile
+## 2. Updated Dockerfile
 FROM asia-south1-docker.pkg.dev/hbl-dev-gcp-gen-ai-prj-spk-5a/genai-docker-virtual-repo/ubi9/python-311
 
 USER root
@@ -60,7 +60,7 @@ USER 1001
 
 CMD ["./init.sh"]
 
-3. Updated init.sh
+## 3. Updated init.sh
 #!/bin/bash
 
 set -e
@@ -93,7 +93,7 @@ case "$SERVICE_MODE" in
     ;;
 esac
 
-4. supervisor.conf (for single-pod mode)
+## 4. supervisor.conf (for single-pod mode)
 # supervisor.conf
 [supervisord]
 nodaemon=true
@@ -125,7 +125,7 @@ stopwaitsecs=600
 killasgroup=true
 user=1001
 
-5. celery_worker.py (Root Level)
+## 5. celery_worker.py (Root Level)
 #!/usr/bin/env python
 """
 Celery worker entry point
@@ -153,7 +153,7 @@ if __name__ == "__main__":
         "--without-heartbeat",
     ])
 
-6. Updated Taskfile.yaml
+## 6. Updated Taskfile.yaml
 version: '3'
 
 vars:
@@ -194,7 +194,7 @@ tasks:
     cmds:
       - uv run celery -A src.celery_app purge -f
 
-7. Helm Deployment Options
+## 7. Helm Deployment Options
 Option A: Separate Deployments (Recommended)
 Create two separate deployments - one for API, one for Celery workers.
 helm-charts/dev-values/platform-service-api.yaml (rename existing):
@@ -299,14 +299,14 @@ envVarsConfig:
     value: "both"  # Runs both API and Celery
   # ... rest of config
 
-8. pyproject.toml - Add Celery
+## 8. pyproject.toml - Add Celery
 [project]
 dependencies = [
     # ... existing dependencies ...
     "celery[redis]>=5.3.4,<6.0.0",
 ]
 
-9. Deployment Commands
+## 9. Deployment Commands
 # Build with Celery support
 task docker-build
 
@@ -322,7 +322,7 @@ helm upgrade --install platform-service-celery ./helm-charts \
 helm upgrade --install platform-service ./helm-charts \
   -f helm-charts/dev-values/platform-service.yaml
 
-10. Local Development
+## 10. Local Development
 # Terminal 1: Run FastAPI
 task run
 
