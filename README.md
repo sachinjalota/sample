@@ -1,82 +1,44 @@
-# src/celery_tasks/monitoring.py - NEW FILE
+FROM asia-south1-docker.pkg.dev/hbl-dev-gcp-gen-ai-prj-spk-5a/genai-docker-virtual-repo/ubi9/python-311
 
-"""
-Placeholder for Opik/observability integration
-To be activated in future
-"""
+USER root
 
-from typing import Any, Dict, Optional
-from src.config import get_settings
+WORKDIR /app
 
-settings = get_settings()
+ARG GCP_ARTIFACT_USERNAME=oauth2accesstoken
+ARG GCP_ARTIFACT_PASSWORD
+ARG PYPI_REPO_URL=asia-south1-python.pkg.dev/hbl-dev-gcp-gen-ai-prj-spk-5a/genai-python-virtual-repo/simple/
 
-class CeleryTaskMonitor:
-    """
-    Placeholder for task monitoring integration
-    
-    Future integrations:
-    - Opik traces
-    - Prometheus metrics
-    - Custom dashboards
-    """
-    
-    @staticmethod
-    def track_task_start(task_id: str, task_name: str, context: Dict[str, Any]) -> Optional[str]:
-        """
-        Track task start event
-        
-        # TODO: Integrate with Opik
-        # from opik import track
-        # trace_id = track.start_trace(
-        #     name=task_name,
-        #     metadata=context
-        # )
-        # return trace_id
-        """
-        pass
-    
-    @staticmethod
-    def track_task_end(task_id: str, trace_id: str, result: Any, error: Optional[Exception] = None) -> None:
-        """
-        Track task completion/failure
-        
-        # TODO: Integrate with Opik
-        # from opik import track
-        # track.end_trace(
-        #     trace_id=trace_id,
-        #     result=result,
-        #     error=error
-        # )
-        """
-        pass
-    
-    @staticmethod
-    def log_metric(metric_name: str, value: float, tags: Dict[str, str] = None) -> None:
-        """
-        Log custom metrics
-        
-        # TODO: Integrate with Prometheus
-        # from prometheus_client import Counter, Histogram
-        # metric.observe(value)
-        """
-        pass
+ENV APP_ROOT=/app/.venv \
+    VIRTUAL_ENV=${APP_ROOT} \
+    UV_PROJECT_ENVIRONMENT=${APP_ROOT} \
+    UV_DEFAULT_INDEX=https://$GCP_ARTIFACT_USERNAME:$GCP_ARTIFACT_PASSWORD@$PYPI_REPO_URL \
+    PATH="${APP_ROOT}/bin:$PATH" \
+    APP_HOST="0.0.0.0" \
+    APP_PORT=8080 \
+    SERVICE_MODE="api"
 
+RUN pip install --no-cache-dir --index-url https://$GCP_ARTIFACT_USERNAME:$GCP_ARTIFACT_PASSWORD@$PYPI_REPO_URL uv==0.5.28
+RUN pip install --no-cache-dir --index-url https://$GCP_ARTIFACT_USERNAME:$GCP_ARTIFACT_PASSWORD@$PYPI_REPO_URL --upgrade pip setuptools wheel
 
-# Usage in tasks (commented out for now):
-# from src.celery_tasks.monitoring import CeleryTaskMonitor
-# 
-# @celery_app.task(bind=True)
-# def some_task(self, context):
-#     # trace_id = CeleryTaskMonitor.track_task_start(
-#     #     task_id=context["task_id"],
-#     #     task_name="extract_pdf",
-#     #     context=context
-#     # )
-#     
-#     try:
-#         # ... task logic ...
-#         # CeleryTaskMonitor.track_task_end(task_id, trace_id, result)
-#         pass
-#     except Exception as e:
-#         # CeleryTaskMonitor.track_task_end(task_id, trace_id, None, e)
-#         raise
+COPY pyproject.toml .
+COPY uv.lock .
+COPY README.md .
+
+# Install Dependencies (includes celery)
+RUN uv sync --no-dev
+
+COPY src ./src
+COPY celery_worker.py .
+COPY init.sh .
+COPY supervisor.conf /etc/supervisor/conf.d/supervisor.conf
+
+RUN chmod +x init.sh celery_worker.py
+
+EXPOSE ${APP_PORT}
+
+RUN chmod -R +x /app
+RUN chown -R 1001:0 /app
+
+USER 1001
+
+CMD ["./init.sh"]
