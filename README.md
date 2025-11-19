@@ -1,551 +1,446 @@
-# src/celery_tasks/file_processing.py - NEW FILE
+# src/api/routers/async_file_processing_router.py - NEW FILE
 
-import traceback
 from datetime import datetime
-from typing import Any, Dict
-from uuid import UUID
+from typing import List, Optional
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-from celery import chain, group
-from celery.exceptions import SoftTimeLimitExceeded
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import ORJSONResponse
 
-from src.celery_app import celery_app
+from src.api.deps import get_cloud_storage_service, validate_headers_and_api_key
 from src.config import get_settings
-from src.db.connection import create_session_platform
+from src.db.connection import create_session
 from src.db.platform_meta_tables import (
     BatchUploadJob,
     FileProcessingTask,
     FileTaskStatus,
     JobStatus,
+    VectorStoreInfo,
 )
 from src.integrations.cloud_storage import CloudStorage
 from src.logging_config import Logger
+from src.models.headers import HeaderInformation
 from src.repository.base_repository import BaseRepository
-from src.services.embedding_service import EmbeddingService
-from src.services.factory.chunking_factory import ChunkingConfig, ChunkingFactory
-from src.services.pdf_extraction_service import PDFExtractionService
-from src.services.service_layer.vector_store_service import VectorStoreService
-from src.models.vector_store_payload import Document, CreateVectorStoreFileRequest
+from src.utility.vector_store_helpers import check_embedding_model, get_usecase_id_by_api_key
+from src.utility.vector_store_utils import create_file_info_tbl_model
 
+router = APIRouter()
 logger = Logger.create_logger(__name__)
 settings = get_settings()
 
 
-def update_task_status(
-    task_id: str,
-    status: FileTaskStatus,
-    current_phase: str = None,
-    error_message: str = None,
-    error_details: Dict = None,
-    **kwargs
-) -> None:
-    """Update file processing task status in DB"""
+async def check_file_version_conflict(
+    vector_store_id: str,
+    file_name: str,
+    storage_backend: str,
+    override: bool
+) -> tuple[bool, Optional[int]]:
+    """
+    Check if file exists in vector store
+    Returns: (conflict_exists, current_version)
+    """
     try:
-        update_data = {
-            "status": status.value,
-            "current_phase": current_phase,
+        # Get vector store name
+        vs_record = BaseRepository.select_one(
+            db_tbl=VectorStoreInfo,
+            filters={"id": vector_store_id, "vector_db": storage_backend}
+        )
+        if not vs_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Vector store '{vector_store_id}' not found"
+            )
+        
+        store_name = vs_record["name"]
+        
+        if storage_backend == "pgvector":
+            file_info_tbl = create_file_info_tbl_model(f"{store_name}_file_info")
+            existing = BaseRepository.select_one(
+                db_tbl=file_info_tbl,
+                filters={"file_name": file_name, "vs_id": vector_store_id},
+                session_factory=create_session
+            )
+            
+            if existing:
+                if not override:
+                    return True, existing.get("file_version", 1)
+                else:
+                    # Will need to delete old version during indexing
+                    return False, existing.get("file_version", 1) + 1
+        
+        elif storage_backend == "elasticsearch":
+            from src.db.elasticsearch_connection import get_elasticsearch_client
+            client = get_elasticsearch_client()
+            
+            file_info_index = f"{store_name}_file_info"
+            query = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"file_name.keyword": file_name}},
+                            {"term": {"vs_id": vector_store_id}}
+                        ]
+                    }
+                }
+            }
+            
+            response = client.search(index=file_info_index, body=query, size=1)
+            hits = response.get("hits", {}).get("hits", [])
+            
+            if hits:
+                if not override:
+                    current_version = hits[0]["_source"].get("file_version", 1)
+                    return True, current_version
+                else:
+                    current_version = hits[0]["_source"].get("file_version", 1)
+                    return False, current_version + 1
+        
+        return False, 1  # No conflict, start at version 1
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error checking file version: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to check file version"
+        )
+
+
+@router.post(
+    "/vector_stores/{store_id}/files/batch",
+    summary="Upload multiple files for async processing",
+    description=(
+        "Uploads files to GCS and queues them for background processing. "
+        "Returns immediately with job_id for status tracking."
+    ),
+    response_class=ORJSONResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def batch_upload_files(
+    store_id: str,
+    files: List[UploadFile] = File(...),
+    override: bool = Query(False, description="Override existing files with same name"),
+    storage_backend: str = Query(..., description="pgvector or elasticsearch"),
+    attributes: Optional[dict] = Query(None, description="Custom file attributes"),
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+    cloud_service: CloudStorage = Depends(get_cloud_storage_service),
+) -> ORJSONResponse:
+    """
+    Async file upload endpoint
+    1. Validates VS and user access
+    2. Checks file versions and conflicts
+    3. Uploads to GCS
+    4. Creates job and task records
+    5. Enqueues Celery tasks
+    6. Returns job_id immediately
+    """
+    
+    if not files or len(files) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No files provided"
+        )
+    
+    if len(files) > 50:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 50 files per batch"
+        )
+    
+    try:
+        # 1. Validate vector store and get metadata
+        usecase_id = await get_usecase_id_by_api_key(header_information.x_base_api_key)
+        
+        vs_record = BaseRepository.select_one(
+            db_tbl=VectorStoreInfo,
+            filters={"id": store_id, "vector_db": storage_backend}
+        )
+        
+        if not vs_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Vector store '{store_id}' not found for backend '{storage_backend}'"
+            )
+        
+        if vs_record["usecase_id"] != usecase_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this vector store"
+            )
+        
+        store_name = vs_record["name"]
+        embedding_model = vs_record["model_name"]
+        
+        # Get embedding model details
+        model_path, embedding_dimensions, context_length = await check_embedding_model(embedding_model)
+        
+        # 2. Validate files and check for conflicts
+        validated_files = []
+        conflicts = []
+        
+        for file in files:
+            # Validate file type
+            if not any(file.filename.lower().endswith(ext) for ext in settings.allowed_file_types):
+                conflicts.append({
+                    "file_name": file.filename,
+                    "reason": f"Unsupported file type. Allowed: {', '.join(settings.allowed_file_types)}"
+                })
+                continue
+            
+            # Validate file size
+            file.file.seek(0, 2)  # Seek to end
+            file_size = file.file.tell()
+            file.file.seek(0)  # Reset
+            
+            if file_size > settings.max_file_size_bytes:
+                conflicts.append({
+                    "file_name": file.filename,
+                    "reason": f"File too large. Max: {settings.max_file_size_bytes / 1024 / 1024}MB"
+                })
+                continue
+            
+            # Check version conflict
+            has_conflict, new_version = await check_file_version_conflict(
+                store_id, file.filename, storage_backend, override
+            )
+            
+            if has_conflict:
+                conflicts.append({
+                    "file_name": file.filename,
+                    "reason": f"File already exists (version {new_version - 1}). Use override=true to replace."
+                })
+                continue
+            
+            validated_files.append((file, new_version))
+        
+        if conflicts and len(validated_files) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": "All files have conflicts", "conflicts": conflicts}
+            )
+        
+        # 3. Create batch job record
+        job_id = uuid4()
+        now_dt = datetime.now(ZoneInfo(settings.timezone))
+        
+        job_data = {
+            "job_id": str(job_id),
+            "vector_store_id": store_id,
+            "usecase_id": usecase_id,
+            "created_at": now_dt,
+            "status": JobStatus.QUEUED.value,
+            "total_files": len(validated_files),
+            "files_queued": len(validated_files),
+            "storage_backend": storage_backend,
+            "embedding_model": embedding_model,
+            "chunking_strategy": vs_record.get("chunking_strategy"),
         }
         
-        if status == FileTaskStatus.FAILED:
-            update_data["error_message"] = error_message
-            update_data["error_details"] = error_details
-            update_data["completed_at"] = datetime.now(ZoneInfo(settings.timezone))
-        elif status == FileTaskStatus.COMPLETED:
-            update_data["completed_at"] = datetime.now(ZoneInfo(settings.timezone))
-        elif status in [FileTaskStatus.EXTRACTING, FileTaskStatus.CHUNKING, FileTaskStatus.EMBEDDING, FileTaskStatus.INDEXING]:
-            if not kwargs.get("started_at"):
-                update_data["started_at"] = datetime.now(ZoneInfo(settings.timezone))
+        BaseRepository.insert_one(db_tbl=BatchUploadJob, data=job_data)
+        logger.info(f"Created batch job {job_id} for {len(validated_files)} files")
         
-        update_data.update(kwargs)
+        # 4. Upload files to GCS and create task records
+        uploaded_files = []
+        task_contexts = []
         
-        BaseRepository.update_many(
-            db_tbl=FileProcessingTask,
-            filters={"task_id": task_id},
-            data=update_data,
-        )
+        for file, new_version in validated_files:
+            file_id = uuid4()
+            task_id = uuid4()
+            
+            # Upload to GCS
+            gcs_object_name = f"vector_store_files/{store_id}/{file_id}_{file.filename}"
+            
+            file.file.seek(0)
+            gcs_path = cloud_service.upload_object(
+                file.file,
+                bucket_name=settings.upload_bucket_name,
+                object_name=gcs_object_name
+            )
+            
+            # Create task record
+            task_data = {
+                "task_id": str(task_id),
+                "job_id": str(job_id),
+                "file_id": str(file_id),
+                "file_name": file.filename,
+                "gcs_path": gcs_path,
+                "status": FileTaskStatus.QUEUED.value,
+                "file_version": new_version,
+                "created_at": now_dt,
+            }
+            
+            BaseRepository.insert_one(db_tbl=FileProcessingTask, data=task_data)
+            
+            # Prepare task context for Celery
+            task_context = {
+                "task_id": str(task_id),
+                "job_id": str(job_id),
+                "file_id": str(file_id),
+                "file_name": file.filename,
+                "gcs_path": gcs_path,
+                "vector_store_id": store_id,
+                "vector_store_name": store_name,
+                "usecase_id": usecase_id,
+                "storage_backend": storage_backend,
+                "embedding_model": embedding_model,
+                "model_path": model_path,
+                "embedding_dimensions": embedding_dimensions,
+                "context_length": context_length,
+                "chunking_strategy": vs_record.get("chunking_strategy"),
+                "attributes": attributes or {},
+                "file_version": new_version,
+            }
+            
+            task_contexts.append(task_context)
+            
+            uploaded_files.append({
+                "file_id": str(file_id),
+                "task_id": str(task_id),
+                "file_name": file.filename,
+                "status": "queued",
+                "version": new_version,
+            })
+        
+        # 5. Enqueue Celery tasks
+        from src.celery_tasks.file_processing import process_single_file
+        from celery import group
+        
+        # Create task group for parallel processing
+        job = group([
+            process_single_file.s(context)
+            for context in task_contexts
+        ])
+        
+        result = job.apply_async()
+        
+        logger.info(f"Enqueued {len(task_contexts)} file processing tasks for job {job_id}")
+        
+        # 6. Return response
+        response_data = {
+            "job_id": str(job_id),
+            "status": "queued",
+            "total_files": len(validated_files),
+            "files_queued": len(validated_files),
+            "files_uploaded": uploaded_files,
+            "conflicts": conflicts if conflicts else None,
+            "message": f"Successfully queued {len(validated_files)} files for processing"
+        }
+        
+        return ORJSONResponse(content=response_data, status_code=status.HTTP_202_ACCEPTED)
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to update task status for {task_id}: {e}")
+        logger.exception(f"Batch upload failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch upload failed: {str(e)}"
+        )
 
 
-def update_job_summary(job_id: str) -> None:
-    """Recalculate and update batch job summary counts"""
+@router.get(
+    "/jobs/{job_id}/status",
+    summary="Get job processing status",
+    description="Returns detailed status of batch upload job and individual file tasks",
+    response_class=ORJSONResponse,
+)
+async def get_job_status(
+    job_id: str,
+    header_information: HeaderInformation = Depends(validate_headers_and_api_key),
+) -> ORJSONResponse:
+    """
+    Status check endpoint
+    Returns:
+    - Overall job status
+    - Per-file progress
+    - Error details (user-friendly)
+    """
     try:
+        # Validate job exists and user has access
+        job = BaseRepository.select_one(
+            db_tbl=BatchUploadJob,
+            filters={"job_id": job_id}
+        )
+        
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job '{job_id}' not found"
+            )
+        
+        # Verify user access
+        usecase_id = await get_usecase_id_by_api_key(header_information.x_base_api_key)
+        if job["usecase_id"] != usecase_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this job"
+            )
+        
+        # Get file tasks
         tasks = BaseRepository.select_many(
             db_tbl=FileProcessingTask,
             filters={"job_id": job_id},
         )
         
-        status_counts = {
-            "files_queued": 0,
-            "files_processing": 0,
-            "files_completed": 0,
-            "files_failed": 0,
+        # Format file statuses
+        files_status = []
+        for task in tasks:
+            file_status = {
+                "file_id": task["file_id"],
+                "task_id": task["task_id"],
+                "file_name": task["file_name"],
+                "status": task["status"],
+                "current_phase": task.get("current_phase"),
+                "retry_count": task.get("retry_count", 0),
+                "created_at": task["created_at"].isoformat() if task.get("created_at") else None,
+                "started_at": task["started_at"].isoformat() if task.get("started_at") else None,
+                "completed_at": task["completed_at"].isoformat() if task.get("completed_at") else None,
+                "chunks_count": task.get("chunks_count"),
+                "usage_bytes": task.get("usage_bytes"),
+            }
+            
+            # Add error info if failed
+            if task["status"] == FileTaskStatus.FAILED.value:
+                file_status["error"] = {
+                    "message": task.get("error_message"),
+                    "stage": task.get("error_details", {}).get("stage") if task.get("error_details") else None,
+                }
+            
+            files_status.append(file_status)
+        
+        # Calculate progress percentage
+        progress_pct = 0
+        if job["total_files"] > 0:
+            progress_pct = round((job["files_completed"] / job["total_files"]) * 100, 2)
+        
+        response_data = {
+            "job_id": job_id,
+            "status": job["status"],
+            "created_at": job["created_at"].isoformat(),
+            "updated_at": job["updated_at"].isoformat() if job.get("updated_at") else None,
+            "progress": {
+                "total_files": job["total_files"],
+                "files_queued": job["files_queued"],
+                "files_processing": job["files_processing"],
+                "files_completed": job["files_completed"],
+                "files_failed": job["files_failed"],
+                "progress_percentage": progress_pct,
+            },
+            "vector_store_id": job["vector_store_id"],
+            "storage_backend": job["storage_backend"],
+            "embedding_model": job["embedding_model"],
+            "files": files_status,
         }
         
-        for task in tasks:
-            if task["status"] == FileTaskStatus.QUEUED.value:
-                status_counts["files_queued"] += 1
-            elif task["status"] in [FileTaskStatus.EXTRACTING.value, FileTaskStatus.CHUNKING.value, 
-                                    FileTaskStatus.EMBEDDING.value, FileTaskStatus.INDEXING.value]:
-                status_counts["files_processing"] += 1
-            elif task["status"] == FileTaskStatus.COMPLETED.value:
-                status_counts["files_completed"] += 1
-            elif task["status"] == FileTaskStatus.FAILED.value:
-                status_counts["files_failed"] += 1
+        return ORJSONResponse(content=response_data, status_code=status.HTTP_200_OK)
         
-        # Determine overall job status
-        total = len(tasks)
-        if status_counts["files_completed"] == total:
-            job_status = JobStatus.COMPLETED
-        elif status_counts["files_failed"] == total:
-            job_status = JobStatus.FAILED
-        elif status_counts["files_failed"] > 0 and status_counts["files_completed"] > 0:
-            job_status = JobStatus.PARTIAL_FAILURE
-        elif status_counts["files_processing"] > 0:
-            job_status = JobStatus.PROCESSING
-        else:
-            job_status = JobStatus.QUEUED
-        
-        BaseRepository.update_many(
-            db_tbl=BatchUploadJob,
-            filters={"job_id": job_id},
-            data={
-                "status": job_status.value,
-                "updated_at": datetime.now(ZoneInfo(settings.timezone)),
-                **status_counts
-            },
-        )
-    except Exception as e:
-        logger.error(f"Failed to update job summary for {job_id}: {e}")
-
-
-@celery_app.task(bind=True, name="src.celery_tasks.file_processing.extract_file_content")
-def extract_file_content(self, task_context: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Task 1: Extract text content from PDF/DOCX files
-    Returns: Updated task_context with extracted_text
-    """
-    task_id = task_context["task_id"]
-    file_name = task_context["file_name"]
-    gcs_path = task_context["gcs_path"]
-    
-    logger.info(f"[Task {task_id}] Starting extraction for {file_name}")
-    update_task_status(task_id, FileTaskStatus.EXTRACTING, "Extracting text from file")
-    
-    try:
-        # Download file from GCS
-        cloud_storage = CloudStorage()
-        file_content = cloud_storage.download_object(gcs_path)
-        
-        # Extract based on file type
-        if file_name.lower().endswith('.pdf'):
-            pdf_service = PDFExtractionService()
-            result = pdf_service.extract_from_bytes(file_content)
-            extracted_text = result.get("extracted_text", "")
-        elif file_name.lower().endswith(('.docx', '.doc')):
-            # Use existing DOCX conversion logic
-            from src.services.file_upload_service import FileUploadService
-            upload_service = FileUploadService()
-            # Convert DOCX to PDF, then extract
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
-                tmp.write(file_content)
-                tmp_path = tmp.name
-            
-            pdf_bytes = upload_service.convert_to_pdf(file_content, file_name)
-            pdf_service = PDFExtractionService()
-            result = pdf_service.extract_from_bytes(pdf_bytes.read())
-            extracted_text = result.get("extracted_text", "")
-        else:
-            raise ValueError(f"Unsupported file type: {file_name}")
-        
-        if not extracted_text or len(extracted_text.strip()) < 10:
-            raise ValueError("Extracted text is empty or too short")
-        
-        # Store extracted text for potential retry
-        update_task_status(
-            task_id,
-            FileTaskStatus.EXTRACTING,
-            "Text extraction completed",
-            extracted_text=extracted_text
-        )
-        
-        task_context["extracted_text"] = extracted_text
-        logger.info(f"[Task {task_id}] Extraction completed: {len(extracted_text)} chars")
-        return task_context
-        
-    except SoftTimeLimitExceeded:
-        error_msg = f"File extraction timed out after {settings.celery_task_soft_time_limit}s"
-        logger.error(f"[Task {task_id}] {error_msg}")
-        update_task_status(
-            task_id,
-            FileTaskStatus.FAILED,
-            error_message=error_msg,
-            error_details={"stage": "extraction", "reason": "timeout"}
-        )
-        update_job_summary(task_context["job_id"])
+    except HTTPException:
         raise
     except Exception as e:
-        error_msg = f"Failed to extract content: {str(e)}"
-        logger.exception(f"[Task {task_id}] {error_msg}")
-        update_task_status(
-            task_id,
-            FileTaskStatus.FAILED,
-            error_message=error_msg,
-            error_details={
-                "stage": "extraction",
-                "exception": str(e),
-                "traceback": traceback.format_exc()
-            }
+        logger.exception(f"Failed to get job status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve job status: {str(e)}"
         )
-        update_job_summary(task_context["job_id"])
-        raise
-
-
-@celery_app.task(bind=True, name="src.celery_tasks.file_processing.chunk_text")
-def chunk_text(self, task_context: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Task 2: Chunk extracted text using configured strategy
-    Returns: Updated task_context with chunks
-    """
-    task_id = task_context["task_id"]
-    extracted_text = task_context.get("extracted_text")
-    
-    if not extracted_text:
-        # Try to retrieve from DB (retry scenario)
-        task_record = BaseRepository.select_one(
-            db_tbl=FileProcessingTask,
-            filters={"task_id": task_id},
-        )
-        extracted_text = task_record.get("extracted_text") if task_record else None
-        
-        if not extracted_text:
-            raise ValueError("No extracted text available for chunking")
-    
-    logger.info(f"[Task {task_id}] Starting chunking")
-    update_task_status(task_id, FileTaskStatus.CHUNKING, "Chunking text into segments")
-    
-    try:
-        chunking_strategy = task_context.get("chunking_strategy", {"type": "auto"})
-        
-        if chunking_strategy["type"] == "static":
-            config = ChunkingConfig(
-                chunk_size=chunking_strategy.get("max_chunk_size_tokens", 2048),
-                overlap=chunking_strategy.get("chunk_overlap_tokens", 256),
-            )
-            strategy = ChunkingFactory.create("recursive", config=config)
-        else:  # auto
-            config = ChunkingConfig(chunk_size=2048, overlap=256)
-            strategy = ChunkingFactory.create("recursive", config=config)
-        
-        # Chunk synchronously (no await needed)
-        import asyncio
-        chunks = asyncio.run(strategy.chunk(extracted_text))
-        
-        if not chunks or len(chunks) == 0:
-            raise ValueError("Chunking produced no results")
-        
-        task_context["chunks"] = chunks
-        update_task_status(
-            task_id,
-            FileTaskStatus.CHUNKING,
-            f"Chunking completed: {len(chunks)} chunks created"
-        )
-        
-        logger.info(f"[Task {task_id}] Chunking completed: {len(chunks)} chunks")
-        return task_context
-        
-    except SoftTimeLimitExceeded:
-        error_msg = "Text chunking timed out"
-        logger.error(f"[Task {task_id}] {error_msg}")
-        update_task_status(
-            task_id,
-            FileTaskStatus.FAILED,
-            error_message=error_msg,
-            error_details={"stage": "chunking", "reason": "timeout"}
-        )
-        update_job_summary(task_context["job_id"])
-        raise
-    except Exception as e:
-        error_msg = f"Failed to chunk text: {str(e)}"
-        logger.exception(f"[Task {task_id}] {error_msg}")
-        update_task_status(
-            task_id,
-            FileTaskStatus.FAILED,
-            error_message=error_msg,
-            error_details={
-                "stage": "chunking",
-                "exception": str(e),
-                "traceback": traceback.format_exc()
-            }
-        )
-        update_job_summary(task_context["job_id"])
-        raise
-
-
-@celery_app.task(bind=True, name="src.celery_tasks.file_processing.generate_embeddings")
-def generate_embeddings(self, task_context: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Task 3: Generate embeddings for chunks
-    Returns: Updated task_context with documents (chunks + embeddings)
-    """
-    task_id = task_context["task_id"]
-    chunks = task_context.get("chunks", [])
-    
-    logger.info(f"[Task {task_id}] Starting embedding generation for {len(chunks)} chunks")
-    update_task_status(task_id, FileTaskStatus.EMBEDDING, "Generating embeddings")
-    
-    try:
-        from src.api.deps import get_openai_service_internal
-        from src.models.vector_store_payload import Document
-        
-        embedding_service = EmbeddingService(open_ai_sdk=get_openai_service_internal())
-        embedding_model = task_context["embedding_model"]
-        
-        # Generate embeddings in batch
-        import asyncio
-        embeddings_result = asyncio.run(
-            embedding_service.get_embeddings(model_name=embedding_model, batch=chunks)
-        )
-        
-        # Construct documents with embeddings
-        documents = []
-        for i, chunk in enumerate(chunks):
-            documents.append({
-                "content": chunk,
-                "embedding": embeddings_result.data[i].embedding,
-                "links": [task_context["file_name"]],
-                "topics": [],
-                "author": None,
-                "meta_data": {
-                    "file_id": task_context["file_id"],
-                    "chunk_index": i,
-                    "total_chunks": len(chunks)
-                }
-            })
-        
-        task_context["documents"] = documents
-        update_task_status(
-            task_id,
-            FileTaskStatus.EMBEDDING,
-            f"Embeddings generated for {len(documents)} chunks"
-        )
-        
-        logger.info(f"[Task {task_id}] Embedding generation completed")
-        return task_context
-        
-    except SoftTimeLimitExceeded:
-        error_msg = "Embedding generation timed out"
-        logger.error(f"[Task {task_id}] {error_msg}")
-        update_task_status(
-            task_id,
-            FileTaskStatus.FAILED,
-            error_message=error_msg,
-            error_details={"stage": "embedding", "reason": "timeout"}
-        )
-        update_job_summary(task_context["job_id"])
-        raise
-    except Exception as e:
-        error_msg = f"Failed to generate embeddings: {str(e)}"
-        logger.exception(f"[Task {task_id}] {error_msg}")
-        update_task_status(
-            task_id,
-            FileTaskStatus.FAILED,
-            error_message=error_msg,
-            error_details={
-                "stage": "embedding",
-                "exception": str(e),
-                "traceback": traceback.format_exc()
-            }
-        )
-        update_job_summary(task_context["job_id"])
-        raise
-
-
-@celery_app.task(bind=True, name="src.celery_tasks.file_processing.index_to_vectorstore")
-def index_to_vectorstore(self, task_context: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Task 4: Index documents to vector store (PGVector or Elasticsearch)
-    Returns: Final task_context with indexing results
-    """
-    task_id = task_context["task_id"]
-    documents = task_context.get("documents", [])
-    
-    logger.info(f"[Task {task_id}] Starting indexing of {len(documents)} documents")
-    update_task_status(task_id, FileTaskStatus.INDEXING, "Indexing to vector store")
-    
-    try:
-        from src.api.deps import get_openai_service_internal
-        from src.models.vector_store_payload import CreateVectorStoreFileRequest, Document as VectorStoreDocument
-        
-        # Convert documents to VectorStoreDocument format
-        file_contents = [
-            VectorStoreDocument(
-                content=doc["content"],
-                links=doc.get("links"),
-                topics=doc.get("topics"),
-                author=doc.get("author"),
-                metadata=doc.get("meta_data")
-            )
-            for doc in documents
-        ]
-        
-        # Create indexing request
-        index_request = CreateVectorStoreFileRequest(
-            storage_backend=task_context["storage_backend"],
-            file_id=task_context["file_id"],
-            file_name=task_context["file_name"],
-            file_contents=file_contents,
-            attributes=task_context.get("attributes", {}),
-            chunking_strategy=task_context.get("chunking_strategy")
-        )
-        
-        # Index via VectorStoreService
-        embedding_service = EmbeddingService(open_ai_sdk=get_openai_service_internal())
-        vector_service = VectorStoreService(
-            backend_name=task_context["storage_backend"],
-            embedding_service=embedding_service
-        )
-        
-        import asyncio
-        result = asyncio.run(
-            vector_service.create_store_file(
-                payload=index_request,
-                store_id=task_context["vector_store_id"],
-                usecase_id=task_context["usecase_id"],
-                model_name=task_context["embedding_model"],
-                context_length=task_context["context_length"],
-                model_path=task_context["model_path"],
-                embedding_dimensions=task_context["embedding_dimensions"]
-            )
-        )
-        
-        # Update task with final results
-        update_task_status(
-            task_id,
-            FileTaskStatus.COMPLETED,
-            "Successfully indexed to vector store",
-            chunks_count=len(documents),
-            usage_bytes=result.usage_bytes
-        )
-        
-        # Update job summary
-        update_job_summary(task_context["job_id"])
-        
-        # Optional: Delete from GCS if configured
-        if settings.delete_gcs_after_indexing:
-            try:
-                cloud_storage = CloudStorage()
-                # Implement delete logic here
-                logger.info(f"[Task {task_id}] Would delete GCS file: {task_context['gcs_path']}")
-            except Exception as del_err:
-                logger.warning(f"[Task {task_id}] Failed to delete GCS file: {del_err}")
-        
-        logger.info(f"[Task {task_id}] Indexing completed successfully")
-        return task_context
-        
-    except SoftTimeLimitExceeded:
-        error_msg = "Indexing to vector store timed out"
-        logger.error(f"[Task {task_id}] {error_msg}")
-        update_task_status(
-            task_id,
-            FileTaskStatus.FAILED,
-            error_message=error_msg,
-            error_details={"stage": "indexing", "reason": "timeout"}
-        )
-        update_job_summary(task_context["job_id"])
-        raise
-    except Exception as e:
-        error_msg = f"Failed to index to vector store: {str(e)}"
-        logger.exception(f"[Task {task_id}] {error_msg}")
-        
-        # Rollback: Delete any partially indexed data
-        try:
-            from src.repository.document_repository import DocumentRepository
-            store_name = task_context["vector_store_name"]
-            
-            if task_context["storage_backend"] == "pgvector":
-                from src.utility.vector_store_utils import create_chunks_tbl_model, create_file_info_tbl_model
-                
-                # Delete chunks
-                vs_chunks_tbl = create_chunks_tbl_model(f"{store_name}_chunks", dimensions=0)
-                BaseRepository.delete(
-                    db_tbl=vs_chunks_tbl,
-                    filters={"file_id": task_context["file_id"]},
-                    session_factory=create_session,
-                )
-                
-                # Delete file info
-                vs_file_info_tbl = create_file_info_tbl_model(f"{store_name}_file_info")
-                BaseRepository.delete(
-                    db_tbl=vs_file_info_tbl,
-                    filters={"file_id": task_context["file_id"]},
-                    session_factory=create_session,
-                )
-                logger.info(f"[Task {task_id}] Rolled back partial indexing (PGVector)")
-                
-            elif task_context["storage_backend"] == "elasticsearch":
-                from src.repository.elasticsearch_dml import ElasticsearchDML
-                
-                chunks_index = f"{store_name}_chunks"
-                file_info_index = f"{store_name}_file_info"
-                
-                # Delete chunks
-                chunk_query = {"query": {"term": {"file_id": task_context["file_id"]}}}
-                ElasticsearchDML.delete(index_name=chunks_index, query=chunk_query)
-                
-                # Delete file info
-                ElasticsearchDML.delete(index_name=file_info_index, doc_id=task_context["file_id"])
-                logger.info(f"[Task {task_id}] Rolled back partial indexing (Elasticsearch)")
-                
-        except Exception as rollback_err:
-            logger.error(f"[Task {task_id}] Rollback failed: {rollback_err}")
-        
-        update_task_status(
-            task_id,
-            FileTaskStatus.FAILED,
-            error_message=f"{error_msg} (Partial data rolled back)",
-            error_details={
-                "stage": "indexing",
-                "exception": str(e),
-                "traceback": traceback.format_exc()
-            }
-        )
-        update_job_summary(task_context["job_id"])
-        raise
-
-
-@celery_app.task(name="src.celery_tasks.file_processing.process_single_file")
-def process_single_file(task_context: Dict[str, Any]) -> None:
-    """
-    Orchestrator task: Chains all file processing steps
-    """
-    task_id = task_context["task_id"]
-    logger.info(f"[Task {task_id}] Starting file processing chain")
-    
-    try:
-        # Create task chain
-        processing_chain = chain(
-            extract_file_content.s(task_context),
-            chunk_text.s(),
-            generate_embeddings.s(),
-            index_to_vectorstore.s()
-        )
-        
-        # Execute chain with retry logic
-        result = processing_chain.apply_async(
-            retry=True,
-            retry_policy={
-                'max_retries': settings.max_task_retries,
-                'interval_start': settings.task_retry_delay,
-                'interval_step': settings.task_retry_delay,
-            }
-        )
-        
-        return result.get()  # Wait for chain completion
-        
-    except Exception as e:
-        logger.exception(f"[Task {task_id}] Processing chain failed: {e}")
-        # Final failure state is already set by individual tasks
-        update_job_summary(task_context["job_id"])
-        raise
