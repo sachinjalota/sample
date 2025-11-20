@@ -1,7 +1,5 @@
-Hi @Bose, Raja, @Mukherjee, Abhishek
+Hi @Bose, Raja, @Mukherjee, Abhishek,
 
-As requested, PFA a PPT that summarises the problem statement that I am working on  in HDFC and progress of the solution provided and the impact it has created. This is also a on-going project, and will keep improving and integrating it with latest tech and tools based on requirements and feedbacks.
+As requested, please find attached a PPT that summarizes the problem statement I am working on for HDFC, the progress made on the proposed solution, and the impact it has created so far. This is an ongoing project, and I will continue to enhance it and integrate the latest technologies and tools based on requirements and feedback.
 
 Please let me know if you need any additional details or further clarifications.
-
-Best Regards,
