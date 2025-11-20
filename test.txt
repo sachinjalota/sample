@@ -1,6 +1,7 @@
-Impact	Value / Reason
-Speed of AI prototype development – ~70 % reduction vs. ad‑hoc scripts (single API, reusable components).	
-Cross‑team adoption – 5+ internal products already consuming the platform (chat assistants, compliance search, call‑center transcription).	
-Operational resilience – Celery job‑tracking + rollback guarantees no partial indexes; error‑rate in bulk ingestion < 1 % (validated in test runs).	
-Vendor flexibility – Switch from PGVector to Elasticsearch for richer semantic search without code changes; future‑proofed for additional back‑ends.	
-Compliance & Governance – All data processing performed in‑house, Guard‑rails enforce policy before LLM output is returned; audit logs stored in PostgreSQL metadata tables.	
+Hi @Bose, Raja, @Mukherjee, Abhishek
+
+As requested, PFA a PPT that summarises the problem statement that I am working on  in HDFC and progress of the solution provided and the impact it has created. This is also a on-going project, and will keep improving and integrating it with latest tech and tools based on requirements and feedbacks.
+
+Please let me know if you need any additional details or further clarifications.
+
+Best Regards,
