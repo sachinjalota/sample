@@ -1,5 +1,9 @@
-Hi @Bose, Raja, @Mukherjee, Abhishek,
-
-As requested, please find attached a PPT that summarizes the problem statement I am working on for HDFC, the progress made on the proposed solution, and the impact it has created so far. This is an ongoing project, and I will continue to enhance it and integrate the latest technologies and tools based on requirements and feedback.
-
-Please let me know if you need any additional details or further clarifications.
+Domain	Key Technologies in the Codebase
+Backend / API	Python 3.11, FastAPI (standard + slowapi rate‑limiting), Pydantic v2 models, SQLAlchemy 2.x, asyncio.
+Vector Store / Embeddings	PGVector (PostgreSQL extension), Elasticsearch 8.x, OpenAI/Litellm embeddings, custom factory pattern for backend‑agnostic access.
+RAG & LLM Integration	OpenAI SDK, Google Vertex AI, Gemini‑2.5‑Flash, Prompt‑Hub (system‑prompt service), Guard‑rail API (content safety).
+File & Speech Processing	PyPDF2, pdfplumber, LibreOffice (DOCX→PDF conversion), Google GenAI (Voice AI, Conversion AI), Whisper‑based models for Indic languages, GCS (fsspec) for storage.
+Async Job Orchestration	Celery 5.x (Redis broker & result backend), Redis 6.x (short‑term chat memory, rate‑limit store).
+Observability & Tracing	Opik SDK (trace capture), logging with per‑module Logger.
+Infrastructure	PostgreSQL (via psycopg2‑binary), Elasticsearch, Google Cloud Storage, Docker (Ubi‑9 Python 3.11 base), uv for dependency management.
+Testing & Quality	pytest, pytest‑asyncio, ruff, mypy (strict), pre‑commit hooks.
