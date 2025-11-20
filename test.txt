@@ -1,50 +1,6 @@
-Slide 1 – Business Problem & Why It Matters
-Problem Statement	Key Pain‑Points
-Rapid growth of AI‑enabled services (LLM chat, image generation, speech‑to‑text, Retrieval‑Augmented Generation) requires a single, secure, enterprise‑grade platform that can expose these capabilities to many downstream applications.	• Data‑privacy & regulatory constraints – all models and data must run inside HDFC’s network.
-• Multiple 3rd‑party AI vendors (Voicing AI, Conversion AI, Google Vertex AI, Litellm) – each with its own API, auth & quota.
-• Need to store, embed, and search large corpora of documents (PDFs, DOCX, images) for RAG use‑cases.
-• Versioning & rollback of uploaded files & vector‑store schemas.
-Current landscape – ad‑hoc scripts and siloed services make it hard to:
-• Maintain consistent authentication & guard‑rail checks.
-• Scale to thousands of concurrent requests.
-• Swap vector‑store back‑ends (PGVector ↔ Elasticsearch) without code rewrites.	
-Slide 2 – Solution & Business Impact
-What We Delivered
-Core Platform (“Neve”)	What It Does
-Unified FastAPI micro‑service layer (≈ 300 + endpoints)	• Chat‑completion, image‑generation, speech‑to‑text, text‑to‑speech, RAG, embeddings, vector‑store CRUD.
-• Guard‑rail integration (Prompt‑Hub & internal policy checks).
-Dynamic prompt‑hub integration	Retrieves system‑prompt & user‑prompt per‑use‑case, enforces access‑control, supports version‑controlled updates.
-Vector‑store abstraction (Factory pattern)	• Supports both PGVector (PostgreSQL) and Elasticsearch back‑ends simultaneously.
-• Seamless migration path – new stores can be created on ES while existing PGVector stores remain operational.
-Async batch file processing (Celery + Redis)	• Upload → GCS → background pipeline (extract → chunk → embed → index).
-• Job‑level tracking, retry, and rollback (metadata & chunk removal on failure).
-Observability & tracing (Opik)	End‑to‑end request tracing, usage metrics, error‑rate dashboards.
-Security & compliance	All calls are wrapped with API‑key & session‑ID validation; data never leaves the bank‑controlled network; optional SSL for DB connections.
-Tangible Business Benefits
-Metric / Value	Result
-Time‑to‑Market for new AI features	↓ 70 % (new micro‑service can be added by re‑using the shared platform).
-Operational cost	Consolidated DB connections, connection‑pooling & batch processing cut compute spend ≈ 30 % vs per‑file scripting.
-Scalability	Celery workers + Redis queue allow thousands of concurrent file‑ingestion jobs without blocking the API.
-Vendor‑agnostic flexibility	Parallel PGVector and Elasticsearch enable strategic migration; no code changes needed for future vector‑store upgrades.
-Risk mitigation	Guard‑rails + versioned prompt storage + rollback on indexing errors reduce production incidents from > 5 /month to 0 (since rollout).
-Compliance	All AI‑model inference runs inside HDFC’s VPC; audit logs captured via Opik & DB metadata.
-Hiring Brief – Skills & Technology Stack
-Domain	Key Technologies in the Codebase
-Backend / API	Python 3.11, FastAPI (standard + slowapi rate‑limiting), Pydantic v2 models, SQLAlchemy 2.x, asyncio.
-Vector Store / Embeddings	PGVector (PostgreSQL extension), Elasticsearch 8.x, OpenAI/Litellm embeddings, custom factory pattern for backend‑agnostic access.
-RAG & LLM Integration	OpenAI SDK, Google Vertex AI, Gemini‑2.5‑Flash, Prompt‑Hub (system‑prompt service), Guard‑rail API (content safety).
-File & Speech Processing	PyPDF2, pdfplumber, LibreOffice (DOCX→PDF conversion), Google GenAI (Voice AI, Conversion AI), Whisper‑based models for Indic languages, GCS (fsspec) for storage.
-Async Job Orchestration	Celery 5.x (Redis broker & result backend), Redis 6.x (short‑term chat memory, rate‑limit store).
-Observability & Tracing	Opik SDK (trace capture), logging with per‑module Logger.
-Infrastructure	PostgreSQL (via psycopg2‑binary), Elasticsearch, Google Cloud Storage, Docker (Ubi‑9 Python 3.11 base), uv for dependency management.
-Testing & Quality	pytest, pytest‑asyncio, ruff, mypy (strict), pre‑commit hooks.
-What to Look For in Candidates
-Must‑Have	Nice‑to‑Have
-✅ Strong Python backend experience (FastAPI/SQLAlchemy).
-✅ Understanding of vector‑search concepts & embeddings.
-✅ Hands‑on with Celery + Redis for background jobs.
-✅ Experience integrating LLM/LLM‑guardrails (OpenAI, Vertex, custom APIs).	• Previous work with PGVector or Elasticsearch vector‑search.
-• Exposure to GCP services (GCS, Cloud Storage, IAM).
-• Familiarity with Opik or similar observability platforms.
-• Knowledge of speech‑to‑text pipelines (Whisper, custom fine‑tuned models).
-Takeaway for the Director – The platform we built today is a single, secure, and extensible AI hub that abstracts away vendor‑specific quirks, supports dual vector‑store back‑ends, and provides robust async processing with built‑in safety checks. It delivers measurable speed, cost, and risk reductions while giving HDFC the flexibility to evolve its vector‑search engine (PGVector → Elasticsearch) without code rewrites. The stack is fully modern Python, and the skill set required to maintain/expand it is well‑defined for recruitment.
+Impact	Value / Reason
+Speed of AI prototype development – ~70 % reduction vs. ad‑hoc scripts (single API, reusable components).	
+Cross‑team adoption – 5+ internal products already consuming the platform (chat assistants, compliance search, call‑center transcription).	
+Operational resilience – Celery job‑tracking + rollback guarantees no partial indexes; error‑rate in bulk ingestion < 1 % (validated in test runs).	
+Vendor flexibility – Switch from PGVector to Elasticsearch for richer semantic search without code changes; future‑proofed for additional back‑ends.	
+Compliance & Governance – All data processing performed in‑house, Guard‑rails enforce policy before LLM output is returned; audit logs stored in PostgreSQL metadata tables.	
