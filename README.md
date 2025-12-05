@@ -1,1 +1,4 @@
 1. PGSQL - postgresql+psycopg2://postgres:GenAISept2025@localhost:5431/usecase_storage_db I connect with it via ssh on my local mac for now 2. I may have, but you create as placeholder for my reference, with same naming conventions 3. BigQuery table to reflect exactly the new schema 4. Proper remove from BigQuery 5. Incremental in the sense which data is added or update after last update. I do have updated_at column -> format of date - '2025-10-09 07:22:20.412' 6. which ever suits best, I don't have a separate table right now 7. no clue for now, but choose for best in terms of scaling 8. That will be managed by service account on dev/uat/prod 9. Daily, with 2 retries for failed tables 10. OK with using external Python libraries
+
+"bigquery_project": "hbl-dev-gcp-gen-ai-prj-spk-5a",
+  "bigquery_dataset": "dev_litellm_spend_logs_dataset",
