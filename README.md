@@ -281,21 +281,12 @@ class LiteLLMBigQuerySync:
         return result_list
     
     def _load_to_bigquery(self, table_name: str, records: List[Dict]) -> int:
-        """Load records to BigQuery using streaming insert"""
+        """Load records to BigQuery using MERGE for upsert behavior"""
         if not records:
             return 0
         
-        table_ref = self.bq_client.dataset(self.config['bigquery_dataset']).table(table_name)
-        
-        # Use streaming inserts with deduplication
-        errors = self.bq_client.insert_rows_json(table_ref, records)
-        
-        if errors:
-            logger.error(f"Errors inserting rows to {table_name}: {errors}")
-            # Fall back to MERGE for better upsert behavior
-            return self._upsert_via_merge(table_name, records)
-        
-        return len(records)
+        # Always use MERGE to prevent duplicates
+        return self._upsert_via_merge(table_name, records)
     
     def _upsert_via_merge(self, table_name: str, records: List[Dict]) -> int:
         """Perform upsert using MERGE statement via temp table"""
