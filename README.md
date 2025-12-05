@@ -1,30 +1,63 @@
-# Use Python 3.11 slim image
-FROM python:3.11-slim
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
-# Set working directory
-WORKDIR /app
+[project]
+name = "litellm-pg2bq-sync"
+version = "1.0.0"
+description = "Incremental sync from LiteLLM PostgreSQL to BigQuery"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Team", email = "team@example.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "psycopg2-binary>=2.9.9",
+    "google-cloud-bigquery>=3.14.0",
+    "google-auth>=2.25.0",
+]
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.3",
+    "pytest-cov>=4.1.0",
+    "black>=23.12.1",
+    "flake8>=6.1.0",
+    "mypy>=1.7.1",
+]
 
-# Copy project files
-COPY pyproject.toml ./
-COPY src/ ./src/
-COPY config/ ./config/
+[project.scripts]
+litellm-sync = "litellm_sync.sync:main"
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .
+[tool.setuptools]
+package-dir = {"" = "src"}
 
-# Create secrets directory
-RUN mkdir -p /app/secrets
+[tool.setuptools.packages.find]
+where = ["src"]
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV TZ=Asia/Kolkata
+[tool.black]
+line-length = 120
+target-version = ['py39', 'py310', 'py311']
 
-# Run the sync script
-CMD ["python", "-m", "litellm_sync.sync"]
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=src/litellm_sync --cov-report=term-missing"
