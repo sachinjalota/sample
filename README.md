@@ -1,3 +1,7 @@
+"error": "Timeout of 600.0s exceeded, last exception: HTTPSConnectionPool(host='bigquery.googleapis.com', port=443): Max retries exceeded with url: /bigquery/v2/projects/hbl-dev-gcp-gen-ai-prj-spk-5a/datasets/dev_litellm_spend_logs_dataset/tables/LiteLLM_DailyTeamSpend/insertAll?prettyPrint=false (Caused by SSLError(SSLEOFError(8, 'EOF occurred in violation of protocol (_ssl.c:2437)')))",
+
+
+
 This error is **not caused by your script** but by **BigQuery rejecting a long-running HTTPS streaming insert**.
 
 Here is what the error means:
@@ -174,18 +178,3 @@ bq_client = bigquery.Client(client_options={"api_endpoint": "https://asia-south1
 * Use JSONL temp file
 * Batch rows in chunks
 * Use regional endpoint
-
----
-
-# If you want:
-
-I can rewrite your full `sync_table()` function to:
-
-✔ generate incremental rows
-✔ batch rows
-✔ write JSONL temp files
-✔ run BigQuery load jobs
-✔ update watermark
-✔ handle schema drift
-
-Just say: **“Rewrite sync_table with load jobs”** and I’ll produce a clean, production-ready version.
