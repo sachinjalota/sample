@@ -1,100 +1,14 @@
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: litellm-pg2bq-sync
-  namespace: default
-spec:
-  # Run at 12:05 AM IST daily (18:35 UTC, since IST = UTC+5:30)
-  schedule: "35 18 * * *"
-  timeZone: "UTC"
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  concurrencyPolicy: Forbid
-  jobTemplate:
-    spec:
-      backoffLimit: 2
-      template:
-        metadata:
-          labels:
-            app: litellm-pg2bq-sync
-        spec:
-          restartPolicy: OnFailure
-          serviceAccountName: litellm-sync-sa
-          containers:
-          - name: sync
-            image: gcr.io/YOUR-PROJECT/litellm-pg2bq-sync:latest
-            imagePullPolicy: Always
-            resources:
-              requests:
-                memory: "512Mi"
-                cpu: "250m"
-              limits:
-                memory: "1Gi"
-                cpu: "500m"
-            env:
-            - name: TZ
-              value: "Asia/Kolkata"
-            - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: "/var/secrets/google/key.json"
-            volumeMounts:
-            - name: config
-              mountPath: /app/config
-              readOnly: true
-            - name: gcp-key
-              mountPath: /var/secrets/google
-              readOnly: true
-          volumes:
-          - name: config
-            configMap:
-              name: litellm-sync-config
-          - name: gcp-key
-            secret:
-              secretName: gcp-service-account-key
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: litellm-sync-sa
-  namespace: default
-  annotations:
-    iam.gke.io/gcp-service-account: litellm-sync@YOUR-PROJECT.iam.gserviceaccount.com
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: litellm-sync-config
-  namespace: default
-data:
-  config.json: |
-    {
-      "postgres_connection_string": "postgresql+psycopg2://postgres:PASSWORD@postgres-host:5432/usecase_storage_db",
-      "bigquery_project": "hbl-dev-gcp-gen-ai-prj-spk-5a",
-      "bigquery_dataset": "dev_litellm_spend_logs_dataset",
-      "tables": [
-        "LiteLLM_OrganizationTable",
-        "LiteLLM_TeamTable",
-        "LiteLLM_DailyTeamSpend"
-      ],
-      "timestamp_columns": [
-        "created_at",
-        "updated_at"
-      ],
-      "primary_keys": {
-        "LiteLLM_OrganizationTable": "organization_id",
-        "LiteLLM_TeamTable": "team_id",
-        "LiteLLM_DailyTeamSpend": "id"
-      },
-      "max_retries": 2,
-      "batch_size": 1000
-    }
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: gcp-service-account-key
-  namespace: default
-type: Opaque
-data:
-  # Base64 encoded service account JSON
-  # Create with: kubectl create secret generic gcp-service-account-key --from-file=key.json=path/to/service-account.json
-  key.json: BASE64_ENCODED_SERVICE_ACCOUNT_JSON
+Manual_Transcriptions_Ground_Truth: hello..hello … Ankit G, yes speaking. Can u give rate for EUR booking, EUR Rupee. Ok u are calling from which company? Ridhi speciality, I need to know current rate for eur for export, Oh!! its Mitesh on the other side, ok, yes.. Current rate for export EUR EUR current rate is 95.56 ok i want to forward sell 1lac EUR for maturity 31Aug, 31 of Aug, ok. Aug month end last good date is 29Aug, no problem no problem, 65, 65,  let me check the premium whether its voltile today, net rate would be sir 97.15 ok please go ahead. ya.  Also sir one more thing like regarding your forward booking, there some doucmetation is pending at your end which Prasad, your business RM would have sent, we are basically increasing the tenure from 6 to 12months and also limit increase to 15cr, so some finding was pending which Suresh said will get it done after checking with your company secretary, so I am just following up regarding that, I am in europe right now, ohh ok ok let me check with Suresh and come back ok.. this is booked ok ok thank you
+
+Gemini: Yeah. Hello. Ankit ji. Yes, I am speaking. You can tell the Euro exchange rate? Euro-Rupee. Yes, from which company are you speaking, sir? Vidhi Vidhi Specialty. I need to know the current rate for Euro for export. Oh, Mittal sir, okay. Yes. Yes. Yes. Yes, sir. The current rate for export Euro. Euro current rate is ninety-five point sixty-six. Okay, I want to forward sell one lakh Euro. For maturity thirty-first of August. Thirty-first of August, okay. August month's last good date is twenty-ninth actually. Twenty-ninth August. No problem. No problem. Yes. Yes. Let me just check the premium whether it's volatile today. Net it would be sir ninety-seven point one-five. Okay. Please go ahead. Yes. Also, sir, one more thing, like regarding your forward booking, there's some documentation pending at your end which probably your business head would have sent. We are basically increasing the tenure from six to twelve months and also limit increased to fifteen cr. So some signing was pending, yeah, which Suresh said he will get it done after checking with your company secretary. So I just following up regarding that. See, I'm in Europe right now. Oh, okay, okay. Let me check with Suresh and come back to you. Yeah, yeah, okay, sir. This here is booked, sir. Okay. Okay, thanks.
+
+Offline_Whisper: Hello? Hello? Yes, I am speaking. Can you tell me the price of Euro? Euro rupee? Yes, which company are you speaking from, sir? Vidhi, Vidhi Specialty. I need to know the current rate for Euro for export. Oh, you are talking from METEF? Yes. current rate for export euro you know current rate is 95.66. Okay, I want to forward sell 1 lakh Euro for maturity 31st of August. Hello. Sir, yes, tell me. August month end last good date is 29th, 29th of August. No problem. Now I am getting 65, so I am having, I'll just take the premium because it's volatile today. Net rate would be sir 97.15 ok please go ahead also sir one more thing regarding your forward booking, there is some documentation pending at your end which Prasad your business RM would have sent. We are basically increasing the tenor from 6 to 12 months and also limit increased to 15th year. So some signing was pending which Suresh said he will get it done after checking with your company secretary. So I just following up regarding that. See, I am in Europe right now. Oh, okay, okay. Let me check with Suresh and come back to you. Yeah, okay sir. This will be good sir. Okay, yeah. Okay, thank you.
+
+STT _V1: I need to know the current rate for Euro for export. current rate for export euro you know current rate is a 95.66 okay I want to forward sell 1 lakh Euro for maturity 31st of August August month and last good date is 29th actually, 29th August, no problem, no problem, now I 65 Wait, I'll just take the premium with it. It's volatile today Netted would be 97 point one five My okay please go ahead Also sir one more thing like regarding your forward booking, there is some documentation pending at your end which Prasad your business RM would have sent. We are basically increasing the tenure from 6 to 12 months and also limit increase to 15th year so some signing was pending with Suresh said he will get it done after checking See, I am in Europe right now, let me check with Suresh and come back to you.
+
+STT_V2: Hello?   Uh, you look at seeing the best idea. Which company are you talking about sir? Vidhi Specialty. I need to know the current rate for Euro for export Oh, Mitre Sir is speaking. Yes The current trade for export euro. Euro current rate is 95.66 I want to forward sell 1 lakh euro. for maturity 31st of August. The 21st of August, okay. month and last good date is 29th actually 29th hours no problem no problem uh now i think 65 All right. It will just take the premium whether it's volatile today. netted would be 97.15 And I, okay, please go ahead. Also sir one more thing like regarding your forward booking, there is some documentation pending at your end which Prasad your business RM would have sent. We are basically increasing the tenor from 6 to 12 months and also limit increase to 15th year so some signing was pending with Suresh said he will get it done after checking with your company secretary, so I'm just following up regarding that. See, I'm in Europe right now. Oh, okay, okay. Let me check with Suresh and come back to you. Yeah, yeah. Okay, sir. Okay. Thank you.
+
+Generate a python script that calculates the following metrics for all of the rest transcriptions taking Manual_Transcriptions_Ground_Truth as base truth
+"BLEU", "WER", "ROUGE-L", "SemanticSim", "BERT-P", "BERT-R", "BERT-F1", "Hybrid"
+
+I'll upload an excel with all the above data, some of columns might be empty.
