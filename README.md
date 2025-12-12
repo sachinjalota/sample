@@ -1,21 +1,50 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "litellm-pg2bq-sync.fullname" . }}-config
-  namespace: {{ .Values.namespace }}
-  labels:
-    {{- include "litellm-pg2bq-sync.labels" . | nindent 4 }}
-data:
-  config.json: |
-    {
-      "postgres_connection_string": "WILL_BE_OVERRIDDEN_BY_ENV",
-      "litellm_db": {{ .Values.config.litellm_db | quote }},
-      "platform_meta_db": {{ .Values.config.platform_meta_db | quote }},
-      "bigquery_project": {{ .Values.config.bigquery_project | quote }},
-      "bigquery_dataset": {{ .Values.config.bigquery_dataset | quote }},
-      "tables": {{ .Values.config.tables | toJson }},
-      "timestamp_columns": {{ .Values.config.timestamp_columns | toJson }},
-      "primary_keys": {{ .Values.config.primary_keys | toJson }},
-      "max_retries": {{ .Values.config.max_retries }},
-      "batch_size": {{ .Values.config.batch_size }}
-    }
+{{/*
+Expand the name of the chart.
+*/}}
+{{- define "litellm-pg2bq-sync.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Create a default fully qualified app name.
+*/}}
+{{- define "litellm-pg2bq-sync.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Create chart name and version as used by the chart label.
+*/}}
+{{- define "litellm-pg2bq-sync.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Common labels
+*/}}
+{{- define "litellm-pg2bq-sync.labels" -}}
+helm.sh/chart: {{ include "litellm-pg2bq-sync.chart" . }}
+{{ include "litellm-pg2bq-sync.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Selector labels
+*/}}
+{{- define "litellm-pg2bq-sync.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "litellm-pg2bq-sync.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app: litellm-pg2bq-sync
+{{- end }}
