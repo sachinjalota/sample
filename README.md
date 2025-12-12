@@ -1,54 +1,65 @@
-image:
-  registry: asia-south1-docker.pkg.dev
-  repository: hbl-dev-gcp-gen-ai-prj-spk-5a/genai-docker-virtual-repo/litellm-pg2bq-sync
-  tag: latest
-  pullPolicy: Always
-
-namespace: services-dev
-
-serviceAccount:
-  name: ksa-genai
-
-cronjob:
-  schedule: "35 18 * * *"  # 12:05 AM IST
-  timeZone: "UTC"
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  concurrencyPolicy: Forbid
-  backoffLimit: 1
-
-resources:
-  requests:
-    memory: "512Mi"
-    cpu: "250m"
-  limits:
-    memory: "1Gi"
-    cpu: "500m"
-
-externalSecret:
-  enabled: true
-  name: litellm-postgres-credentials
-  refreshInterval: 1h
+{{- if .Values.externalSecret.enabled }}
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: {{ .Values.externalSecret.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  refreshInterval: {{ .Values.externalSecret.refreshInterval }}
   secretStoreRef:
-    name: gcpsm-secret-store
-    kind: ClusterSecretStore
-  remoteSecretKey: projects/626624654237/secrets/LITELLM_SYNC_DEV_DATABASE_URL/versions/1
-
-config:
-  litellm_db: "litellm_db"
-  platform_meta_db: "platform_meta_db"
-  bigquery_project: "hbl-dev-gcp-gen-ai-prj-spk-5a"
-  bigquery_dataset: "dev_litellm_spend_logs_dataset"
-  tables:
-    - LiteLLM_OrganizationTable
-    - LiteLLM_TeamTable
-    - LiteLLM_DailyTeamSpend
-  timestamp_columns:
-    - created_at
-    - updated_at
-  primary_keys:
-    LiteLLM_OrganizationTable: organization_id
-    LiteLLM_TeamTable: team_id
-    LiteLLM_DailyTeamSpend: id
-  max_retries: 1
-  batch_size: 2000
+    name: {{ .Values.externalSecret.secretStoreRef.name }}
+    kind: {{ .Values.externalSecret.secretStoreRef.kind }}
+  target:
+    name: {{ .Values.externalSecret.name }}
+    creationPolicy: Owner
+  data:
+  - secretKey: connection_string
+    remoteRef:
+      key: {{ .Values.externalSecret.remoteSecretKey }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "litellm-pg2bq-sync.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "litellm-pg2bq-sync.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  timeZone: {{ .Values.cronjob.timeZone | quote }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.cronjob.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "litellm-pg2bq-sync.selectorLabels" . | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          serviceAccount: {{ .Values.serviceAccount.name }}
+          containers:
+          - name: sync
+            image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            imagePullPolicy: {{ .Values.image.pullPolicy }}
+            resources:
+              {{- toYaml .Values.resources | nindent 14 }}
+            env:
+            - name: TZ
+              value: "Asia/Kolkata"
+            - name: POSTGRES_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecret.name }}
+                  key: connection_string
+            volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+          volumes:
+          - name: config
+            configMap:
+              name: {{ include "litellm-pg2bq-sync.fullname" . }}-config
