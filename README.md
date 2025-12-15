@@ -1,28 +1,16 @@
-FROM asia-south1-docker.pkg.dev/hbl-dev-gcp-gen-ai-prj-spk-5a/genai-docker-virtual-repo/ubi9/python-311
+Installing collected packages: pip
+  Attempting uninstall: pip
+    Found existing installation: pip 24.2
+    Uninstalling pip-24.2:
+      Successfully uninstalled pip-24.2
+Successfully installed pip-25.3
 
-USER root
+Usage:   
+  pip install [options] <requirement specifier> [package-index-options] ...
+  pip install [options] -r <requirements file> [package-index-options] ...
+  pip install [options] [-e] <vcs project url> ...
+  pip install [options] [-e] <local project path> ...
+  pip install [options] <archive url/path> ...
 
-WORKDIR /app
-
-ARG GCP_ARTIFACT_USERNAME=oauth2accesstoken
-ARG GCP_ARTIFACT_PASSWORD
-ARG PYPI_REPO_URL=asia-south1-python.pkg.dev/hbl-dev-gcp-gen-ai-prj-spk-5a/genai-python-virtual-repo/simple/
-ARG PYPI_LOCAL_REPO_URL=asia-south1-python.pkg.dev/hbl-dev-gcp-gen-ai-prj-spk-5a/genai-python-repo/simple/
-
-# Copy project files
-COPY pyproject.toml ./
-COPY src/ ./src/
-COPY config/ ./config/
-
-# Install Python dependencies
-RUN pip install --no-cache-dir --index-url https://$GCP_ARTIFACT_USERNAME:$GCP_ARTIFACT_PASSWORD@$PYPI_REPO_URL --upgrade pip && \
-    pip install --no-cache-dir --index-url https://$GCP_ARTIFACT_USERNAME:$GCP_ARTIFACT_PASSWORD@$PYPI_REPO_URL -e .
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV TZ=Asia/Kolkata
-
-USER 1001
-
-# Run the sync script
-CMD ["python", "-m", "litellm_sync.sync"]
+no such option: -p
+Error: building at STEP "RUN pip install --no-cache-dir --index-url https://$GCP_ARTIFACT_USERNAME:$GCP_ARTIFACT_PASSWORD@$PYPI_REPO_URL --upgrade pip &&     pip install --no-cache-dir --index-url https://$GCP_ARTIFACT_USERNAME:$GCP_ARTIFACT_PASSWORD@$PYPI_REPO_URL -e .     mkdir -p /app/config": while running runtime: exit status 2
