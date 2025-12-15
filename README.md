@@ -1,50 +1,14 @@
-{{/*
-Expand the name of the chart.
-*/}}
-{{- define "litellm-pg2bq-sync.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
-{{- end }}
-
-{{/*
-Create a default fully qualified app name.
-*/}}
-{{- define "litellm-pg2bq-sync.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
-{{- end }}
-{{- end }}
-
-{{/*
-Create chart name and version as used by the chart label.
-*/}}
-{{- define "litellm-pg2bq-sync.chart" -}}
-{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{- end }}
-
-{{/*
-Common labels
-*/}}
-{{- define "litellm-pg2bq-sync.labels" -}}
-helm.sh/chart: {{ include "litellm-pg2bq-sync.chart" . }}
-{{ include "litellm-pg2bq-sync.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end }}
-
-{{/*
-Selector labels
-*/}}
-{{- define "litellm-pg2bq-sync.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "litellm-pg2bq-sync.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
-app: litellm-pg2bq-sync
-{{- end }}
+[hdfcbank@genai-hdfc-jump-vm genai-agent-mesh]$ sudo docker run asia-south1-docker.pkg.dev/hbl-dev-gcp-gen-ai-prj-spk-5a/gen-ai-docker-repo/litellm-pg2bq-sync:v20251215
+Emulate Docker CLI using podman. Create /etc/containers/nodocker to quiet msg.
+<frozen runpy>:128: RuntimeWarning: 'litellm_sync.sync' found in sys.modules after import of package 'litellm_sync', but prior to execution of 'litellm_sync.sync'; this may result in unpredictable behaviour
+2025-12-15 15:35:54,673 - __main__ - ERROR - Fatal error: Config file not found: config/config.json
+Traceback (most recent call last):
+  File "/app/src/litellm_sync/sync.py", line 445, in main
+    sync = LiteLLMBigQuerySync(config_path="config/config.json")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/litellm_sync/sync.py", line 81, in __init__
+    self.config = self._load_config(config_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/litellm_sync/sync.py", line 92, in _load_config
+    raise FileNotFoundError(f"Config file not found: {config_path}")
+FileNotFoundError: Config file not found: config/config.json
